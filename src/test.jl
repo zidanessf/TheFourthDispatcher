@@ -1,3 +1,3 @@
 import myUCApp
-myUCApp.maxReserve()
-# myUCApp.UC()
+# myUCApp.maxReserve()
+myUCApp.UC()
