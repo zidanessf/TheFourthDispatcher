@@ -104,7 +104,8 @@ function maxReserve()::Cint
     @variable(m,cold[x in keys(param),t in 1:T],binary=true)
     # @variable(m,UT[x in keys(param),t in 0:T])
     # @variable(m,DT[x in keys(param),t in 0:T])
-    @variable(m,Pg[x in keys(param),t in 1:T],lower_bound=0)
+    @variable(m,Pg[x in keys(param),t in 1:T],lower_bound=0) #燃机出力
+    @variable(m,PMg[x in keys(param),t in 1:T],lower_bound=0) #燃机有效备用
     @variable(m,dPg[x in keys(param),t in 1:T],lower_bound=0)
     @variable(m,loadcut[t in 1:T],lower_bound=0)#正备用缺口
     @variable(m,windcut[t in 1:T],lower_bound=0)#负备用缺口
@@ -120,17 +121,6 @@ function maxReserve()::Cint
         for x in keys(param)
             @constraint(m,Pg[x,t] <= (1-cold[x,t])*param[x]["Pmax"])# 技术出力上限
             @constraint(m,Pg[x,t] >= hot[x,t]*param[x]["Pmin"])# 技术出力下限
-            # @constraint(m,Pg[x,t] <= st[x,t]*param[x]["Pmax"])# 技术出力上限
-            # @constraint(m,Pg[x,t] >= st[x,t]*param[x]["Pmin"])# 技术出力下限
-
-            # ##启动曲线
-            # @constraint(m,Pg[x,t] >= UT[x,t]/4 * param[x]["Pmin"] - hot[x,t]*10000 - (1-st[x,t])*10000)
-            # @constraint(m,Pg[x,t] <= UT[x,t]/4 * param[x]["Pmin"] + hot[x,t]*10000 + (1-st[x,t])*10000)
-            # ##
-            # ##停机曲线
-            # @constraint(m,Pg[x,t] >= (4-DT[x,t])/4 * param[x]["Pmin"] - cold[x,t]*10000 - st[x,t]*10000)
-            # @constraint(m,Pg[x,t] <= (4-DT[x,t])/4 * param[x]["Pmin"] + cold[x,t]*10000 + st[x,t]*10000)
-            # #
             if t >= 2 #爬坡率约束
                 @constraint(m,Pg[x,t] - Pg[x,t-1] <= hot[x,t-1]*param[x]["Pmax"]/3 + (1-hot[x,t-1])*param[x]["Pmin"]/4)
                 @constraint(m,Pg[x,t-1] - Pg[x,t] <= hot[x,t-1]*param[x]["Pmax"]/3 + (1-hot[x,t-1])*param[x]["Pmin"]/4)
@@ -206,7 +196,11 @@ function maxReserve()::Cint
         end
     end
     XLSX.writetable("assets/必开燃机列表.xlsx",df;overwrite=true)
-    run(`cmd /c .\\assets\\必开燃机列表.xlsx`)
+    if Sys.iswindows()
+        run(`cmd /c .\\assets\\必开燃机列表.xlsx`)
+    else
+        run(`open ./assets/必开燃机列表.xlsx`)
+    end
     return 0# if things finished successfully
   end
 function UC()::Cint
