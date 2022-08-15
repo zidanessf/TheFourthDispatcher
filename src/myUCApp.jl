@@ -106,6 +106,7 @@ function maxReserve()::Cint
         # @variable(m,UT[x in keys(param),t in 0:T])
         # @variable(m,DT[x in keys(param),t in 0:T])
         @variable(m,Pg[x in keys(param),t in 1:T],lower_bound=0)
+        @variable(m,PMg[x in keys(param),t in 1:T],lower_bound=0)
         @variable(m,dPg[x in keys(param),t in 1:T],lower_bound=0)
         @variable(m,loadcut[t in 1:T],lower_bound=0)#正备用缺口
         @variable(m,windcut[t in 1:T],lower_bound=0)#负备用缺口
@@ -121,6 +122,11 @@ function maxReserve()::Cint
             for x in keys(param)
                 @constraint(m,Pg[x,t] <= (1-cold[x,t])*param[x]["Pmax"])# 技术出力上限
                 @constraint(m,Pg[x,t] >= hot[x,t]*param[x]["Pmin"])# 技术出力下限
+                # @constraint(m,PMg[x,t] == (1 - hot[x,t]) * Pg[x,t] + hot[x,t]*param[x]["Pmax"])
+                @constraint(m,PMg[x,t] <= Pg[x,t] + hot[x,t] * param[x]["Pmax"])
+                @constraint(m,PMg[x,t] >= Pg[x,t] - hot[x,t] * param[x]["Pmax"])
+                @constraint(m,PMg[x,t] <= param[x]["Pmax"])
+                @constraint(m,PMg[x,t] >= hot[x,t] * param[x]["Pmax"])
                 # @constraint(m,Pg[x,t] <= st[x,t]*param[x]["Pmax"])# 技术出力上限
                 # @constraint(m,Pg[x,t] >= st[x,t]*param[x]["Pmin"])# 技术出力下限
     
@@ -164,9 +170,9 @@ function maxReserve()::Cint
             # @constraint(m,coal[t] + water[t] + sum(l[t] for l in [nuclear,wind,solar,ext]) +
             #  sum(Pg[x,t] for x in keys(param)) == load[t] - loadcut[t])
             @constraint(m,COAL_PMAX + WATER + sum(l[t] for l in [nuclear,wind,solar,ext]) +
-            sum(Pg[x,t] for x in keys(param)) >= load[t] + RESERVE - loadcut[t]) #正备用约束
+            sum(PMg[x,t] for x in keys(param)) >= load[t] + RESERVE - loadcut[t]) #正备用约束
             @constraint(m,COAL_PMAX + WATER + sum(l[t] for l in [nuclear,wind,solar,ext]) +
-            sum(Pg[x,t] for x in keys(param)) == load[t] + RESERVE + reserve[t]) #正备用约束
+            sum(PMg[x,t] for x in keys(param)) == load[t] + RESERVE + reserve[t]) #正备用约束
             @constraint(m,COAL_PMIN + sum(l[t] for l in [nuclear,wind,solar,ext]) +
             sum(Pg[x,t] for x in keys(param)) <= load[t] + windcut[t]) #负备用约束
             @constraint(m,COAL_PMIN + sum(l[t] for l in [nuclear,wind,solar,ext]) +
@@ -207,7 +213,11 @@ function maxReserve()::Cint
             end
         end
         XLSX.writetable("assets/必开燃机列表.xlsx",df;overwrite=true)
-        run(`cmd /c .\\assets\\必开燃机列表.xlsx`)
+        if Sys.iswindows()
+            run(`cmd /c .\\assets\\必开燃机列表.xlsx`)
+        else
+            run(`open ./assets/必开燃机列表.xlsx`)
+        end
         return 0# if things finished successfully    
     catch err
         showerror(stdout, err, catch_backtrace())
@@ -216,13 +226,6 @@ function maxReserve()::Cint
         print(s)
         return 0
     end
-    XLSX.writetable("assets/必开燃机列表.xlsx",df;overwrite=true)
-    if Sys.iswindows()
-        run(`cmd /c .\\assets\\必开燃机列表.xlsx`)
-    else
-        run(`open ./assets/必开燃机列表.xlsx`)
-    end
-    return 0# if things finished successfully
   end
 function UC()::Cint
     try
@@ -331,6 +334,7 @@ function UC()::Cint
         # @variable(m,DT[x in keys(param),t in 0:T])
         @variable(m,Pg[x in keys(param),t in 1:T],lower_bound=0)
         @variable(m,dPg[x in keys(param),t in 1:T],lower_bound=0)
+        @variable(m,PMg[x in keys(param),t in 1:T],lower_bound=0)
         @variable(m,loadcut[t in 1:T],lower_bound=0)#正备用缺口
         @variable(m,windcut[t in 1:T],lower_bound=0)#负备用缺口
         @variable(m,rho)
@@ -346,6 +350,10 @@ function UC()::Cint
             for x in keys(param)
                 @constraint(m,Pg[x,t] <= (1-cold[x,t])*param[x]["Pmax"])# 技术出力上限
                 @constraint(m,Pg[x,t] >= hot[x,t]*param[x]["Pmin"])# 技术出力下限
+                @constraint(m,PMg[x,t] <= Pg[x,t] + hot[x,t] * param[x]["Pmax"])
+                @constraint(m,PMg[x,t] >= Pg[x,t] - hot[x,t] * param[x]["Pmax"])
+                @constraint(m,PMg[x,t] <= param[x]["Pmax"])
+                @constraint(m,PMg[x,t] >= hot[x,t] * param[x]["Pmax"])
                 # @constraint(m,Pg[x,t] <= st[x,t]*param[x]["Pmax"])# 技术出力上限
                 # @constraint(m,Pg[x,t] >= st[x,t]*param[x]["Pmin"])# 技术出力下限
     
@@ -389,9 +397,9 @@ function UC()::Cint
             # @constraint(m,coal[t] + water[t] + sum(l[t] for l in [nuclear,wind,solar,ext]) +
             #  sum(Pg[x,t] for x in keys(param)) == load[t] - loadcut[t])
             @constraint(m,COAL_PMAX + WATER + sum(l[t] for l in [nuclear,wind,solar,ext]) +
-            sum(Pg[x,t] for x in keys(param)) >= load[t] + RESERVE - loadcut[t]) #正备用约束
+            sum(PMg[x,t] for x in keys(param)) >= load[t] + RESERVE - loadcut[t]) #正备用约束
             @constraint(m,COAL_PMAX + WATER + sum(l[t] for l in [nuclear,wind,solar,ext]) +
-            sum(Pg[x,t] for x in keys(param)) == load[t] + RESERVE + reserve[t]) #正备用约束
+            sum(PMg[x,t] for x in keys(param)) == load[t] + RESERVE + reserve[t]) #正备用约束
             @constraint(m,COAL_PMIN + sum(l[t] for l in [nuclear,wind,solar,ext]) +
             sum(Pg[x,t] for x in keys(param)) <= load[t] + windcut[t]) #负备用约束
             @constraint(m,COAL_PMIN + sum(l[t] for l in [nuclear,wind,solar,ext]) +
