@@ -6,7 +6,7 @@
     "期望备用":2090,
     "最多启停次数":1,
     "maxTimeformaxReserve":30,
-    "logmaxReserve":false,
+    "logmaxReserve":true,
     "maxTimeforUC":60,
     "logUC":true
 }

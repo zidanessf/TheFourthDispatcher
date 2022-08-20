@@ -434,29 +434,30 @@ function UC()::Cint
         else
             @suppress_out optimize!(m)
         end
+        TT = [(t+4*(24-OFFSET)-2)%96+1 for t in 1:T]
         df = DataFrame()
-        df[!,"时刻"] = [next_day + Hour(OFFSET) + Minute((t-1)*15) for t in 1:T]
-        df[!,"煤机最大发电能力"] = [COAL_PMAX for t in 1:T]
-        df[!,"煤机最小发电能力"] = [COAL_PMIN for t in 1:T]
-        df[!,"燃机"] = Int.(round.([sum(value(Pg[x,t]) for x in keys(param)) for t in 1:T]))
-        df[!,"水电"] = [WATER for t in 1:T]
-        df[!,"核电"] = nuclear
-        df[!,"风电"] = wind
-        df[!,"光伏"] = solar
-        df[!,"受电"] = ext
-        df[!,"统调负荷"] = load
-        df[!,"正备用"] = Int.(round.([value(reserve[t]) + RESERVE for t in 1:T]))
-        df[!,"负备用"] = Int.(round.(value.(neg_reserve)))
+        df[!,"时刻"] = [next_day + Minute(t*15) for t in 1:T]
+        df[!,"煤机最大发电能力"] = [COAL_PMAX for t in TT]
+        df[!,"煤机最小发电能力"] = [COAL_PMIN for t in TT]
+        df[!,"燃机"] = Int.(round.([sum(value(Pg[x,t]) for x in keys(param)) for t in TT]))
+        df[!,"水电"] = [WATER for t in TT]
+        df[!,"核电"] = [nuclear[t] for t in TT]
+        df[!,"风电"] = [wind[t] for t in TT]
+        df[!,"光伏"] = [solar[t] for t in TT]
+        df[!,"受电"] = [ext[t] for t in TT]
+        df[!,"统调负荷"] = [load[t] for t in TT]
+        df[!,"正备用"] = Int.(round.([value(reserve[t]) + RESERVE for t in TT]))
+        df[!,"负备用"] = Int.(round.([value(neg_reserve[t]) for t in TT]))
         for x in ordered_unit
-            df[!,x] = Int.(round.(value.(Pg[x,:])))
+            df[!,x] = Int.(round.([value(Pg[x,t]) for t in TT]))
         end
         df2 = DataFrame()
         df2[!,"燃气电厂"] = [alias_to_full[p]["输出名称"] for p in keys(plant)]
         df2[!,"计划气量"] = [plant[p]["total_gas"] for p in keys(plant)]
         df3 = DataFrame()
-        df3[!,"时刻"] = [next_day + Hour(OFFSET) + Minute((t-1)*15) for t in 1:T]
+        df3[!,"时刻"] = [Dates.format(next_day + Minute(t*15),dateformat"yyyy-mm-dd HH:MM:SS") for t in 1:T]
         for x in ordered_unit
-            df3[!,param[x]["输出名称"]] = Int.(round.(value.(Pg[x,:])))
+            df3[!,param[x]["输出名称"]] = Int.(round.([value(Pg[x,t]) for t in TT]))
         end
         println("优化成功！")
         println("备用最低值为$(minimum(value.(reserve)) + RESERVE)")
@@ -467,7 +468,7 @@ function UC()::Cint
         save_file_name = save_file("";filterlist="xlsx")
         # save_file_name = save_dialog("结果保存至...", GtkNullContainer(), (GtkFileFilter("*.xlsx", name="All supported formats"), "*.xlsx"))
         # XLSX.writetable(save_file_name,df;overwrite=true)
-        XLSX.writetable(save_file_name,"REPORT_A"=>df,"REPORT_B"=>df2,"REPORT_C"=>df3;overwrite=true)
+        XLSX.writetable(save_file_name,"REPORT_A"=>df,"REPORT_B"=>df2,"REPORT_C"=>permutedims(df3,"时刻");overwrite=true)
         lowest,p = findmin(df[!,"正备用"][1:68])
         tl,tc,tr,te,tso,twi = round(df[!,"统调负荷"][p]/10),round(df[!,"煤机最大发电能力"][p]/10),round(df[!,"燃机"][p]/10),round(df[!,"受电"][p]/10),round(df[!,"光伏"][p]/10),round(df[!,"风电"][p]/10)
         lowest_time = Dates.format(df[!,"时刻"][p],"HH:MM")
