@@ -186,7 +186,7 @@ function maxReserve()::Cint
             else
                 @constraint(m,sum(up[x,t] for t in 1:T) == 1)
                 @constraint(m,sum(down[x,t] for t in 1:T) == 1)
-                for t in T-20:T
+                for t in T-16:T
                     @constraint(m,st[x,t] == 0)
                 end
             end
@@ -413,12 +413,12 @@ function UC()::Cint
             else
                 @constraint(m,sum(up[x,t] for t in 1:T) <= config["最多启停次数"])
                 @constraint(m,sum(down[x,t] for t in 1:T) <= config["最多启停次数"])
-                for t in 1:T-19
+                for t in 1:T-15
                     if !ismissing(required_uc[!,x][t])
                         @constraint(m,st[x,t] == 1)
                     end
                 end
-                for t in T-20:T
+                for t in T-16:T
                     @constraint(m,st[x,t] == 0)
                 end
             end
@@ -465,14 +465,14 @@ function UC()::Cint
         # for i in 1:length(plants_keys)
         #     println("$(plants_keys[i]) 的气量影子价格为:$(dual(gas_cons_ref[i]))")
         # end
-        save_file_name = save_file("";filterlist="xlsx")
-        # save_file_name = save_dialog("结果保存至...", GtkNullContainer(), (GtkFileFilter("*.xlsx", name="All supported formats"), "*.xlsx"))
-        # XLSX.writetable(save_file_name,df;overwrite=true)
-        XLSX.writetable(save_file_name,"REPORT_A"=>df,"REPORT_B"=>df2,"REPORT_C"=>permutedims(df3,"时刻");overwrite=true)
-        lowest,p = findmin(df[!,"正备用"][1:68])
-        tl,tc,tr,te,tso,twi = round(df[!,"统调负荷"][p]/10),round(df[!,"煤机最大发电能力"][p]/10),round(df[!,"燃机"][p]/10),round(df[!,"受电"][p]/10),round(df[!,"光伏"][p]/10),round(df[!,"风电"][p]/10)
-        lowest_time = Dates.format(df[!,"时刻"][p],"HH:MM")
-        println("明日备用情况：按计划曲线考虑，$(lowest_time)备用最紧，为$(Int(round(lowest/10)))万千瓦；该时刻，统调负荷$(Int(tl))万千瓦，煤机$(Int(tc))万千瓦，燃机$(Int(tr))万千瓦，受电$(Int(te))万千瓦，统调光伏$(Int(tso))万千瓦，统调风电$(Int(twi))万千瓦。")
+        println("明日备用情况：按（手填）曲线考虑")
+        for (timeslot,t1,t2) in zip(["凌晨","早峰","午峰","晚峰"],[1,28,44,68],[27,43,67,96])
+            tmpdf = df[t1:t2,names(df)]
+            lowest,p = findmin(tmpdf[!,"正备用"])
+            tl,tc,tr,te,tso,twi = round(tmpdf[!,"统调负荷"][p]/10),round(tmpdf[!,"煤机最大发电能力"][p]/10),round(tmpdf[!,"燃机"][p]/10),round(tmpdf[!,"受电"][p]/10),round(tmpdf[!,"光伏"][p]/10),round(tmpdf[!,"风电"][p]/10)
+            lowest_time = Dates.format(tmpdf[!,"时刻"][p],"HH:MM")
+            println("$(timeslot)，$(lowest_time)备用最紧，为$(Int(round(lowest/10)))万千瓦；该时刻，统调负荷$(Int(tl))万千瓦，煤机$(Int(tc))万千瓦，燃机$(Int(tr))万千瓦，受电$(Int(te))万千瓦，统调光伏$(Int(tso))万千瓦，统调风电$(Int(twi))万千瓦。")
+        end
         println("明日燃机开机容量$(total_capacity)万千瓦，总气量$(Int(sum(df2[!,"计划气量"])))万方。")
         for this_plant in gas_plan
             k = this_plant["plant"]
@@ -485,6 +485,7 @@ function UC()::Cint
                 tmpstr *= "$(gy)机过夜"
             end
             print("$k $(tmpstr)（$(plant[k]["total_gas"])万方）。")
+            Tplus7 = [(t + 26)%T + 1 for t in 1:T]
             if length(plant[k]["units"]) == 1
                 x = plant[k]["units"][1]
                 if param[x]["是否过夜"] == 1
@@ -496,7 +497,7 @@ function UC()::Cint
                     end
                 else
                     start,stop = findfirst([value(hot[x,t])>0 for t in 1:T]),findlast(([value(hot[x,t])>0 for t in 1:T]))
-                    start,stop = df[!,"时刻"][start],df[!,"时刻"][stop]
+                    start,stop = df[!,"时刻"][Tplus7[start]],df[!,"时刻"][Tplus7[stop]]
                     load_rate = round(100*sum(value(hot[x,t])*value(Pg[x,t]) for t in 1:T)/(sum(value.(hot[x,:]))*param[x]["Pmax"]))
                     if hour(stop) > 8
                         print("$(Dates.format(start,"HH:MM"))带足--$(Dates.format(stop,"HH:MM"))")
@@ -523,7 +524,7 @@ function UC()::Cint
                         end
                     else
                         start,stop = findfirst([value(hot[x,t])>0 for t in 1:T]),findlast(([value(hot[x,t])>0 for t in 1:T]))
-                        start,stop = df[!,"时刻"][start],df[!,"时刻"][stop]
+                        start,stop = df[!,"时刻"][Tplus7[start]],df[!,"时刻"][Tplus7[stop]]
                         load_rate = round(100*sum(value(hot[x,t])*value(Pg[x,t]) for t in 1:T)/(sum(value.(hot[x,:]))*param[x]["Pmax"]))
                         if hour(stop) > 8
                             print("     #$(i)机: $(Dates.format(start,"HH:MM"))带足--$(Dates.format(stop,"HH:MM"))")
@@ -539,13 +540,18 @@ function UC()::Cint
                 end
             end
         end
-        println("press Enter to quit...")
+        println("请将结果文件保存至本地...")
+        save_file_name = save_file("";filterlist="xlsx")
+        # save_file_name = save_dialog("结果保存至...", GtkNullContainer(), (GtkFileFilter("*.xlsx", name="All supported formats"), "*.xlsx"))
+        # XLSX.writetable(save_file_name,df;overwrite=true)
+        XLSX.writetable(save_file_name,"REPORT_A"=>df,"REPORT_B"=>df2,"REPORT_C"=>permutedims(df3,"时刻");overwrite=true)
+        println("流程结束，按回车键退出...")
         s = readline()
         print(s)
         return 0# if things finished successfully
     catch err
         showerror(stdout, err, catch_backtrace())
-        println("press Enter to quit...")
+        println("流程结束，按回车键退出...")
         s = readline()
         print(s)
         return 0
