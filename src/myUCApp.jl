@@ -24,7 +24,7 @@ function maxReserve()::Cint
         gas_plan = collect(eachmatch(r"(?P<plant>[\u4e00-\u9fa5]*)(?P<plan>[1-9]{1}[机组][^，]*)（(?P<gas>\d*)万方",gas_plan_string))
         # gas_plan_tmp = [[c for c in x.match] for x in gas_plan]
         # gas_plan_unpack = Array([(join(x[1:end-2],""),parse(Int,x[end-1])) for x in gas_plan_tmp])
-        namemap = DataFrame(XLSX.readtable("assets/燃机名称表.xlsx","Sheet1","A:E")...)
+        namemap = DataFrame(XLSX.readtable("assets/燃机名称表.xlsx","Sheet1","A:G")...)
         # gas_total = []
         # for s in eachmatch(r"[\(（][1-9]\d*万方",gas_plan_string)
         #     push!(gas_total,parse(Int,match(r"[1-9]\d*",s.match).match))
@@ -33,6 +33,7 @@ function maxReserve()::Cint
         for i in range(1,stop=nrow(namemap))
             alias_to_full[namemap[i,:别名]] = Dict()
             alias_to_full[namemap[i,:别名]]["Pmax"] = namemap[i,:单机出力上限]
+            alias_to_full[namemap[i,:别名]]["Pmin"] = namemap[i,:单机出力下限]
             alias_to_full[namemap[i,:别名]]["unit_gas"] = namemap[i,:度电耗气]
         end
         param = Dict()
@@ -45,7 +46,7 @@ function maxReserve()::Cint
                 for n in 1:parse(Int,this_plant["plan"][1])
                     param["$k#$(n)机"] = Dict()
                     param["$k#$(n)机"]["Pmax"] = alias_to_full[k]["Pmax"]
-                    param["$k#$(n)机"]["Pmin"] = 0.6*param["$k#$(n)机"]["Pmax"]
+                    param["$k#$(n)机"]["Pmin"] = alias_to_full[k]["Pmin"]
                     param["$k#$(n)机"]["单耗"] = alias_to_full[k]["unit_gas"]
                     param["$k#$(n)机"]["是否过夜"] = 0
                     push!(plant[k]["units"],"$k#$(n)机")
@@ -57,7 +58,7 @@ function maxReserve()::Cint
                     for i in 1:parse(Int,mc["number"])
                         param["$k#$(n)机"] = Dict()
                         param["$k#$(n)机"]["Pmax"] = alias_to_full[k]["Pmax"]
-                        param["$k#$(n)机"]["Pmin"] = 0.6*param["$k#$(n)机"]["Pmax"]
+                        param["$k#$(n)机"]["Pmin"] = alias_to_full[k]["Pmin"]
                         param["$k#$(n)机"]["单耗"] = alias_to_full[k]["unit_gas"]
                         if mc["method"]=="过夜" || mc["method"]=="连续运行"
                             param["$k#$(n)机"]["是否过夜"] = 1
@@ -252,7 +253,7 @@ function UC()::Cint
         gas_plan = collect(eachmatch(r"(?P<plant>[\u4e00-\u9fa5]*)(?P<plan>[1-9]{1}[机组][^，]*)（(?P<gas>\d*)万方",gas_plan_string))
         # gas_plan_tmp = [[c for c in x.match] for x in gas_plan]
         # gas_plan_unpack = Array([(join(x[1:end-2],""),parse(Int,x[end-1])) for x in gas_plan_tmp])
-        namemap = DataFrame(XLSX.readtable("assets/燃机名称表.xlsx","Sheet1","A:F")...)
+        namemap = DataFrame(XLSX.readtable("assets/燃机名称表.xlsx","Sheet1","A:G")...)
         # gas_total = []
         # for s in eachmatch(r"[\(（][1-9]\d*万方",gas_plan_string)
         #     push!(gas_total,parse(Int,match(r"[1-9]\d*",s.match).match))
@@ -261,6 +262,7 @@ function UC()::Cint
         for i in range(1,stop=nrow(namemap))
             alias_to_full[namemap[i,:别名]] = Dict()
             alias_to_full[namemap[i,:别名]]["Pmax"] = namemap[i,:单机出力上限]
+            alias_to_full[namemap[i,:别名]]["Pmin"] = namemap[i,:单机出力下限]
             alias_to_full[namemap[i,:别名]]["unit_gas"] = namemap[i,:度电耗气]
             alias_to_full[namemap[i,:别名]]["输出名称"] = namemap[i,:输出名称]
         end
@@ -274,7 +276,7 @@ function UC()::Cint
                 for n in 1:parse(Int,this_plant["plan"][1])
                     param["$k#$(n)机"] = Dict()
                     param["$k#$(n)机"]["Pmax"] = alias_to_full[k]["Pmax"]
-                    param["$k#$(n)机"]["Pmin"] = 0.6*param["$k#$(n)机"]["Pmax"]
+                    param["$k#$(n)机"]["Pmin"] = alias_to_full[k]["Pmin"]
                     param["$k#$(n)机"]["单耗"] = alias_to_full[k]["unit_gas"]
                     param["$k#$(n)机"]["是否过夜"] = 0
                     param["$k#$(n)机"]["输出名称"] = alias_to_full[k]["输出名称"] * "#$(n)机"
@@ -287,7 +289,7 @@ function UC()::Cint
                     for i in 1:parse(Int,mc["number"])
                         param["$k#$(n)机"] = Dict()
                         param["$k#$(n)机"]["Pmax"] = alias_to_full[k]["Pmax"]
-                        param["$k#$(n)机"]["Pmin"] = 0.6*param["$k#$(n)机"]["Pmax"]
+                        param["$k#$(n)机"]["Pmin"] = alias_to_full[k]["Pmin"]
                         param["$k#$(n)机"]["单耗"] = alias_to_full[k]["unit_gas"]
                         param["$k#$(n)机"]["输出名称"] = alias_to_full[k]["输出名称"] * "#$(n)机"
                         if mc["method"]=="过夜" || mc["method"]=="连续运行"
@@ -439,7 +441,7 @@ function UC()::Cint
         df[!,"时刻"] = [next_day + Minute(t*15) for t in 1:T]
         df[!,"煤机最大发电能力"] = [COAL_PMAX for t in TT]
         df[!,"煤机最小发电能力"] = [COAL_PMIN for t in TT]
-        df[!,"燃机"] = Int.(round.([sum(value(Pg[x,t]) for x in keys(param)) for t in TT]))
+        df[!,"燃机最大发电能力"] = Int.(round.([sum(value(PMg[x,t]) for x in keys(param)) for t in TT]))
         df[!,"水电"] = [WATER for t in TT]
         df[!,"核电"] = [nuclear[t] for t in TT]
         df[!,"风电"] = [wind[t] for t in TT]
@@ -448,6 +450,7 @@ function UC()::Cint
         df[!,"统调负荷"] = [load[t] for t in TT]
         df[!,"正备用"] = Int.(round.([value(reserve[t]) + RESERVE for t in TT]))
         df[!,"负备用"] = Int.(round.([value(neg_reserve[t]) for t in TT]))
+        df[!,"燃机总出力"] = Int.(round.([sum(value(Pg[x,t]) for x in keys(param)) for t in TT]))
         for x in ordered_unit
             df[!,x] = Int.(round.([value(Pg[x,t]) for t in TT]))
         end
@@ -469,9 +472,10 @@ function UC()::Cint
         for (timeslot,t1,t2) in zip(["凌晨","早峰","午峰","晚峰"],[1,28,44,68],[27,43,67,96])
             tmpdf = df[t1:t2,names(df)]
             lowest,p = findmin(tmpdf[!,"正备用"])
-            tl,tc,tr,te,tso,twi = round(tmpdf[!,"统调负荷"][p]/10),round(tmpdf[!,"煤机最大发电能力"][p]/10),round(tmpdf[!,"燃机"][p]/10),round(tmpdf[!,"受电"][p]/10),round(tmpdf[!,"光伏"][p]/10),round(tmpdf[!,"风电"][p]/10)
+            tl,tc,tr,te,tso,twi = round(tmpdf[!,"统调负荷"][p]/10),round(tmpdf[!,"煤机最大发电能力"][p]/10),round(tmpdf[!,"燃机总出力"][p]/10),round(tmpdf[!,"受电"][p]/10),round(tmpdf[!,"光伏"][p]/10),round(tmpdf[!,"风电"][p]/10)
+            tmg = round(tmpdf[!,"燃机最大发电能力"][p]/10)
             lowest_time = Dates.format(tmpdf[!,"时刻"][p],"HH:MM")
-            println("$(timeslot)，$(lowest_time)备用最紧，为$(Int(round(lowest/10)))万千瓦；该时刻，统调负荷$(Int(tl))万千瓦，煤机$(Int(tc))万千瓦，燃机$(Int(tr))万千瓦，受电$(Int(te))万千瓦，统调光伏$(Int(tso))万千瓦，统调风电$(Int(twi))万千瓦。")
+            println("$(timeslot)，$(lowest_time)备用最紧，为$(Int(round(lowest/10)))万千瓦；该时刻，统调负荷$(Int(tl))万千瓦，煤机$(Int(tc))万千瓦，燃机$(Int(tr))万千瓦（发电能力$(Int(tmg))），受电$(Int(te))万千瓦，统调光伏$(Int(tso))万千瓦，统调风电$(Int(twi))万千瓦。")
         end
         println("明日燃机开机容量$(total_capacity)万千瓦，总气量$(Int(sum(df2[!,"计划气量"])))万方。")
         for this_plant in gas_plan

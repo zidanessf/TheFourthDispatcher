@@ -5,6 +5,7 @@
     "应留备用":2090,
     "期望备用":2090,
     "最多启停次数":1,
+    "凌晨挪气":true,
     "maxTimeformaxReserve":30,
     "logmaxReserve":true,
     "maxTimeforUC":60,
