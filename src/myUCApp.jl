@@ -269,10 +269,20 @@ function UC()::Cint
         param = Dict()
         plant = Dict()
         ordered_unit = []
+        # 获取燃气电厂当前气量
+        scada_today = XLSX.readtable("assets\\燃机名称表.xlsx",2)
+        for i in 2:length(scada_today[2])
+            k = scada_today[2][i]
+            remained_gas,current_power = scada_today[1][i][3],scada_today[1][i][5]
+            plant[k] = Dict()
+            plant[k]["remained_gas"] = 
+            # 辨识当前燃机开机台数（下一步用可用容量试试）
+            plant[k]["running_units"] = round(current_power/alias_to_full[k]["Pmax"])
+        end
         for this_plant in gas_plan
             k = this_plant["plant"]
-            plant[k] = Dict("total_gas"=>parse(Int,this_plant["gas"]),"units"=>[])
-            if length(this_plant["plan"]) == 2 #无特殊要求，默认不过夜
+            plant[k] = Dict("total_gas"=>parse(Int,this_plant["gas"]),"units"=>[],"remained_gas"=>0)
+            if length(this_plant["plan"]) == 2 #无特殊要求，默认不过夜(这个分支应该调用不到，后续考虑删除)
                 for n in 1:parse(Int,this_plant["plan"][1])
                     param["$k#$(n)机"] = Dict()
                     param["$k#$(n)机"]["Pmax"] = alias_to_full[k]["Pmax"]
@@ -300,6 +310,23 @@ function UC()::Cint
                         push!(plant[k]["units"],"$k#$(n)机")
                         push!(ordered_unit,"$k#$(n)机")
                         n += 1
+                    end
+                end
+                #若n小于当前组数，说明有若干机组明天不开
+                if n < plant[k]["running_units"]
+                    for i in n+1:plant[k]["running_units"]
+                        param["$k#$(n)机"] = Dict()
+                        param["$k#$(n)机"]["Pmax"] = alias_to_full[k]["Pmax"]
+                        param["$k#$(n)机"]["Pmin"] = alias_to_full[k]["Pmin"]
+                        param["$k#$(n)机"]["单耗"] = alias_to_full[k]["unit_gas"]
+                        param["$k#$(n)机"]["输出名称"] = alias_to_full[k]["输出名称"] * "#$(n)机"
+                        if mc["method"]=="过夜" || mc["method"]=="连续运行"
+                            param["$k#$(n)机"]["是否过夜"] = 1
+                        else
+                            param["$k#$(n)机"]["是否过夜"] = 0
+                        end
+                        push!(plant[k]["units"],"$k#$(n)机")
+                        push!(ordered_unit,"$k#$(n)机")
                     end
                 end
             end    
