@@ -317,7 +317,7 @@ function UC()::Cint
         for list in (nuclear,wind,solar,ext,load,gas_power)
             tmp = [x for x in list]
             for i in 1:length(list)
-                list[i] = tmp[(i+4*OFFSET-2)%96+1]
+                list[i] = tmp[(i+4*OFFSET-1)%96+1]
             end
         end
         COAL_PMAX,COAL_PMIN = config["统调燃煤机组最大发电能力"],config["统调燃煤机组最小发电能力"]
@@ -436,7 +436,7 @@ function UC()::Cint
         else
             @suppress_out optimize!(m)
         end
-        TT = [(t+4*(24-OFFSET)-2)%96+1 for t in 1:T]
+        TT = [(T-4*OFFSET+t-1)%96 + 1 for t in 1:T]
         df = DataFrame()
         df[!,"时刻"] = [next_day + Minute(t*15) for t in 1:T]
         df[!,"煤机最大发电能力"] = [COAL_PMAX for t in TT]
@@ -501,6 +501,9 @@ function UC()::Cint
                     end
                 else
                     start,stop = findfirst([value(hot[x,t])>0 for t in 1:T]),findlast(([value(hot[x,t])>0 for t in 1:T]))
+                    if isnothing(start)
+                        continue
+                    end
                     start,stop = df[!,"时刻"][Tplus7[start]],df[!,"时刻"][Tplus7[stop]]
                     load_rate = round(100*sum(value(hot[x,t])*value(Pg[x,t]) for t in 1:T)/(sum(value.(hot[x,:]))*param[x]["Pmax"]))
                     if hour(stop) > 8
