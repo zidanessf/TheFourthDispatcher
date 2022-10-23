@@ -237,6 +237,10 @@ function UC()::Cint
             return v == "高峰电量"
         end
         # filename = "assets/日前计划编制报表20220721.xlsx"
+        #获取当前超短期数据
+        today_schedule = DataFrame(XLSX.readtable("assets/today_schedule.xls",1,"B:K";
+        first_row=2)...)
+        println(today_schedule)
         println("请选择日前计划文件（仅支持xlsx格式）！")
         filename = pick_file("";filterlist="xlsx")
         next_day_schedule = DataFrame(XLSX.readtable(filename,1,"A:EG";
@@ -315,18 +319,14 @@ function UC()::Cint
                 #若n小于当前组数，说明有若干机组明天不开
                 if n < plant[k]["running_units"]
                     for i in n+1:plant[k]["running_units"]
-                        param["$k#$(n)机"] = Dict()
-                        param["$k#$(n)机"]["Pmax"] = alias_to_full[k]["Pmax"]
-                        param["$k#$(n)机"]["Pmin"] = alias_to_full[k]["Pmin"]
-                        param["$k#$(n)机"]["单耗"] = alias_to_full[k]["unit_gas"]
-                        param["$k#$(n)机"]["输出名称"] = alias_to_full[k]["输出名称"] * "#$(n)机"
-                        if mc["method"]=="过夜" || mc["method"]=="连续运行"
-                            param["$k#$(n)机"]["是否过夜"] = 1
-                        else
-                            param["$k#$(n)机"]["是否过夜"] = 0
-                        end
-                        push!(plant[k]["units"],"$k#$(n)机")
-                        push!(ordered_unit,"$k#$(n)机")
+                        param["$k#$(i)机"] = Dict()
+                        param["$k#$(i)机"]["Pmax"] = alias_to_full[k]["Pmax"]
+                        param["$k#$(i)机"]["Pmin"] = alias_to_full[k]["Pmin"]
+                        param["$k#$(i)机"]["单耗"] = alias_to_full[k]["unit_gas"]
+                        param["$k#$(i)机"]["输出名称"] = alias_to_full[k]["输出名称"] * "#$(i)机"
+                        param["$k#$(i)机"]["是否过夜"] = 0
+                        push!(plant[k]["units"],"$k#$(i)机")
+                        push!(ordered_unit,"$k#$(i)机")
                     end
                 end
             end    
@@ -341,12 +341,14 @@ function UC()::Cint
         end
         nuclear,wind,solar,ext,load = next_day_schedule[!,:核电],next_day_schedule[!,:风电],next_day_schedule[!,:光伏],next_day_schedule[!,:受电],next_day_schedule[!,:统调负荷]
         gas_power = next_day_schedule[!,:燃气]
+        # 拼接次日7:00-后天7:00的计划类数据
         for list in (nuclear,wind,solar,ext,load,gas_power)
             tmp = [x for x in list]
             for i in 1:length(list)
                 list[i] = tmp[(i+4*OFFSET-1)%96+1]
             end
         end
+
         COAL_PMAX,COAL_PMIN = config["统调燃煤机组最大发电能力"],config["统调燃煤机组最小发电能力"]
         RESERVE = config["期望备用"]
         WATER = config["水电发电能力"]
