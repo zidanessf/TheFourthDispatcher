@@ -237,6 +237,10 @@ function UC()::Cint
             return v == "高峰电量"
         end
         # filename = "assets/日前计划编制报表20220721.xlsx"
+        #获取当前超短期数据
+        today_schedule = DataFrame(XLSX.readtable("assets/today_schedule.xls",1,"B:K";
+        first_row=2)...)
+        println(today_schedule)
         println("请选择日前计划文件（仅支持xlsx格式）！")
         filename = pick_file("";filterlist="xlsx")
         next_day_schedule = DataFrame(XLSX.readtable(filename,1,"A:EG";
@@ -269,10 +273,20 @@ function UC()::Cint
         param = Dict()
         plant = Dict()
         ordered_unit = []
+        # 获取燃气电厂当前气量
+        scada_today = XLSX.readtable("assets\\燃机名称表.xlsx",2)
+        for i in 2:length(scada_today[2])
+            k = scada_today[2][i]
+            remained_gas,current_power = scada_today[1][i][3],scada_today[1][i][5]
+            plant[k] = Dict()
+            plant[k]["remained_gas"] = 
+            # 辨识当前燃机开机台数（下一步用可用容量试试）
+            plant[k]["running_units"] = round(current_power/alias_to_full[k]["Pmax"])
+        end
         for this_plant in gas_plan
             k = this_plant["plant"]
-            plant[k] = Dict("total_gas"=>parse(Int,this_plant["gas"]),"units"=>[])
-            if length(this_plant["plan"]) == 2 #无特殊要求，默认不过夜
+            plant[k] = Dict("total_gas"=>parse(Int,this_plant["gas"]),"units"=>[],"remained_gas"=>0)
+            if length(this_plant["plan"]) == 2 #无特殊要求，默认不过夜(这个分支应该调用不到，后续考虑删除)
                 for n in 1:parse(Int,this_plant["plan"][1])
                     param["$k#$(n)机"] = Dict()
                     param["$k#$(n)机"]["Pmax"] = alias_to_full[k]["Pmax"]
@@ -302,6 +316,19 @@ function UC()::Cint
                         n += 1
                     end
                 end
+                #若n小于当前组数，说明有若干机组明天不开
+                if n < plant[k]["running_units"]
+                    for i in n+1:plant[k]["running_units"]
+                        param["$k#$(i)机"] = Dict()
+                        param["$k#$(i)机"]["Pmax"] = alias_to_full[k]["Pmax"]
+                        param["$k#$(i)机"]["Pmin"] = alias_to_full[k]["Pmin"]
+                        param["$k#$(i)机"]["单耗"] = alias_to_full[k]["unit_gas"]
+                        param["$k#$(i)机"]["输出名称"] = alias_to_full[k]["输出名称"] * "#$(i)机"
+                        param["$k#$(i)机"]["是否过夜"] = 0
+                        push!(plant[k]["units"],"$k#$(i)机")
+                        push!(ordered_unit,"$k#$(i)机")
+                    end
+                end
             end    
         end
         ## 必开燃机中过夜
@@ -314,12 +341,14 @@ function UC()::Cint
         end
         nuclear,wind,solar,ext,load = next_day_schedule[!,:核电],next_day_schedule[!,:风电],next_day_schedule[!,:光伏],next_day_schedule[!,:受电],next_day_schedule[!,:统调负荷]
         gas_power = next_day_schedule[!,:燃气]
+        # 拼接次日7:00-后天7:00的计划类数据
         for list in (nuclear,wind,solar,ext,load,gas_power)
             tmp = [x for x in list]
             for i in 1:length(list)
                 list[i] = tmp[(i+4*OFFSET-1)%96+1]
             end
         end
+
         COAL_PMAX,COAL_PMIN = config["统调燃煤机组最大发电能力"],config["统调燃煤机组最小发电能力"]
         RESERVE = config["期望备用"]
         WATER = config["水电发电能力"]
@@ -475,7 +504,7 @@ function UC()::Cint
             tl,tc,tr,te,tso,twi = round(tmpdf[!,"统调负荷"][p]/10),round(tmpdf[!,"煤机最大发电能力"][p]/10),round(tmpdf[!,"燃机总出力"][p]/10),round(tmpdf[!,"受电"][p]/10),round(tmpdf[!,"光伏"][p]/10),round(tmpdf[!,"风电"][p]/10)
             tmg = round(tmpdf[!,"燃机最大发电能力"][p]/10)
             lowest_time = Dates.format(tmpdf[!,"时刻"][p],"HH:MM")
-            println("$(timeslot)，$(lowest_time)备用最紧，为$(Int(round(lowest/10)))万千瓦；该时刻，统调负荷$(Int(tl))万千瓦，煤机$(Int(tc))万千瓦，燃机$(Int(tr))万千瓦（发电能力$(Int(tmg))），受电$(Int(te))万千瓦，统调光伏$(Int(tso))万千瓦，统调风电$(Int(twi))万千瓦。")
+            println("$(timeslot)，$(lowest_time)备用最紧，为$(Int(round(lowest/10)))万千瓦；该时刻，统调负荷$(Int(tl))万千瓦，煤机$(Int(tc))万千瓦，燃机$(Int(tmg))万千瓦，受电$(Int(te))万千瓦，统调光伏$(Int(tso))万千瓦，统调风电$(Int(twi))万千瓦。")
         end
         println("明日燃机开机容量$(total_capacity)万千瓦，总气量$(Int(sum(df2[!,"计划气量"])))万方。")
         for this_plant in gas_plan
