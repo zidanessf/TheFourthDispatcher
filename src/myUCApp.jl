@@ -237,6 +237,7 @@ function UC()::Cint
             return v == "高峰电量"
         end
         NOW = Int(ceil(hour(now())*4 + minute(now())/15))
+        NOW = 64
         # filename = "assets/日前计划编制报表20220721.xlsx"
         #获取当前超短期数据
         today_schedule = DataFrame(XLSX.readtable("assets/today_schedule.xlsx",1,"B:K";
@@ -245,7 +246,6 @@ function UC()::Cint
         filename = pick_file("";filterlist="xlsx")
         next_day_schedule = DataFrame(XLSX.readtable(filename,1,"A:EG";
         first_row=3,stop_in_row_function=myfun)...)
-        required_uc = DataFrame(XLSX.readtable("assets/必开燃机列表.xlsx",1)...)
         next_day_string = replace(split(XLSX.readdata(filename,1,"AJ2"))[1],r"[年月日]"=>"")
         next_day = DateTime(next_day_string,DateFormat("yyyymmdd"))
         row_string = XLSX.readtable(filename, 1,"A:EG";
@@ -259,6 +259,7 @@ function UC()::Cint
         # gas_plan_unpack = Array([(join(x[1:end-2],""),parse(Int,x[end-1])) for x in gas_plan_tmp])
         namemap = DataFrame(XLSX.readtable("assets/燃机名称表.xlsx","别名","A:B")...)
         parametersmap = DataFrame(XLSX.readtable("assets/燃机名称表.xlsx","参数","A:F")...)
+        ST_COST = DataFrame(XLSX.readtable("assets/燃机名称表.xlsx","启动成本","A:F")...)[!,:启动成本]
         # gas_total = []
         # for s in eachmatch(r"[\(（][1-9]\d*万方",gas_plan_string)
         #     push!(gas_total,parse(Int,match(r"[1-9]\d*",s.match).match))
@@ -288,7 +289,7 @@ function UC()::Cint
                 plant[k]["total_gas"] = 0
                 plant[k]["remained_gas"] = remained_gas
                 # 辨识当前燃机开机台数（下一步用可用容量试试）
-                plant[k]["running_units"] = round(current_power/parameters[k]["Pmax"])
+                plant[k]["running_units"] = Int(round(current_power/parameters[k]["Pmax"]))
                 plant[k]["units"] = []
             end
         end
@@ -320,17 +321,16 @@ function UC()::Cint
                         param["$k#$(n)机"]["Pmin"] = parameters[k]["Pmin"]
                         param["$k#$(n)机"]["单耗"] = parameters[k]["unit_gas"]
                         param["$k#$(n)机"]["输出名称"] = parameters[k]["输出名称"] * "#$(n)机"
-                        # if mc["method"]=="过夜" || mc["method"]=="连续运行"
-                        #     param["$k#$(n)机"]["是否过夜"] = 1
-                        # else
-                        #     param["$k#$(n)机"]["是否过夜"] = 0
-                        # end
+                        param["$k#$(n)机"]["是否过夜"] = 0
                         push!(plant[k]["units"],"$k#$(n)机")
                         push!(ordered_unit,"$k#$(n)机")               
                         if n <= plant[k]["running_units"]
-                            param["$k#$(n)机"]["running"] = true
+                            param["$k#$(n)机"]["running"] = 1
+                            if mc["method"]=="过夜" || mc["method"]=="连续运行"
+                                param["$k#$(n)机"]["是否过夜"] = 1
+                            end
                         else
-                            param["$k#$(n)机"]["running"] = false
+                            param["$k#$(n)机"]["running"] = 0
                         end
                         n += 1
                     end
@@ -343,15 +343,39 @@ function UC()::Cint
                         param["$k#$(i)机"]["Pmin"] = parameters[k]["Pmin"]
                         param["$k#$(i)机"]["单耗"] = parameters[k]["unit_gas"]
                         param["$k#$(i)机"]["输出名称"] = parameters[k]["输出名称"] * "#$(i)机"
-                        param["$k#$(i)机"]["running"] = true
-                        # param["$k#$(i)机"]["是否过夜"] = 0
+                        param["$k#$(i)机"]["running"] = 1
+                        param["$k#$(i)机"]["是否过夜"] = 0
                         push!(plant[k]["units"],"$k#$(i)机")
                         push!(ordered_unit,"$k#$(i)机")
                     end
                 end
             end    
         end
-        ## 必开燃机中过夜
+        T = 96 + 32
+        T0 = NOW - 96
+        df = DataFrame()
+        df[!,"时刻"] = [next_day + Minute(t*15) for t in T0:T]
+        for x in ordered_unit
+            if param[x]["是否过夜"] == 1
+                df[!,x] = [t ∈ 1:32 ? 1 : missing for t in T0:T]
+            else
+                df[!,x] = [missing for t in T0:T]
+            end
+        end
+        XLSX.writetable("assets/必开燃机列表.xlsx",df;overwrite=true)
+        println("请设置必开燃机，设置完后保存关闭")
+        if Sys.iswindows()
+            run(`cmd /c .\\assets\\必开燃机列表.xlsx`)
+        else
+            run(`open ./assets/必开燃机列表.xlsx`)
+        end
+        readline()
+        required_uc = DataFrame(XLSX.readtable("assets/必开燃机列表.xlsx",1)...)
+        # println([x for x in keys(param) if param[x]["running"]])
+        # for p in keys(plant)
+        #     println(plant[p])
+        # end
+        # ## 必开燃机中过夜
         # for x in keys(param)
         #     if !ismissing(sum(required_uc[!,x]))
         #         if sum(required_uc[!,x]) == 96
@@ -366,7 +390,7 @@ function UC()::Cint
         parse.(Float64,today_schedule[!,:风电]),
         parse.(Float64,today_schedule[!,:光伏]),
         parse.(Float64,today_schedule[!,:受电]),
-        parse.(Float64,today_schedule[!,:超短期负荷])
+        - parse.(Float64,today_schedule[!,:超短期负荷])
         # 拼接次日24:00-后天7:00的计划类数据
         for list in (nuclear,wind,solar,ext,load,gas_power)
             for i in 1:32
@@ -379,8 +403,6 @@ function UC()::Cint
         m = Model(CPLEX.Optimizer)
         println("正在进行备用优化...") 
         ### 
-        T = 96 + 32
-        T0 = NOW - 96
         @variable(m,st[x in keys(param),t in T0:T],binary=true)
         @variable(m,up[x in keys(param),t in T0:T],binary=true)
         @variable(m,down[x in keys(param),t in T0:T],binary=true)
@@ -396,8 +418,12 @@ function UC()::Cint
         @variable(m,rho)
         @variable(m,reserve[t in T0:T])
         @variable(m,neg_reserve[t in T0:T])
-        @variable(m,dg1[p in keys(plant)],lower_bound=0)
+        @variable(m,dg1_plus[p in keys(plant)],lower_bound=0)
+        @variable(m,dg1_minus[p in keys(plant)],lower_bound=0)
+        @variable(m,dg1_indicator[p in keys(plant)],binary=true) #进行挪气的指示变量
         @variable(m,dg2[p in keys(plant)],lower_bound=0)
+        @variable(m,dg_total_plus,lower_bound=0)
+        @variable(m,dg_total_minus,lower_bound=0)
         # @variable(m,coal[t in 1:T],lower_bound=COAL_PMIN,upper_bound=COAL_PMAX)
         # @variable(m,water[t in 1:T],lower_bound=0,upper_bound=WATER)
         # @variable(m,fuel_cost[t in 1:T],lower_bound=0)
@@ -405,6 +431,15 @@ function UC()::Cint
         for t in T0:T
             ### 机组约束
             for x in keys(param)
+                ## 必开必停
+                if !ismissing(required_uc[t-T0+1,x])
+                    @constraint(m,st[x,t] == required_uc[t-T0+1,x])
+                end
+                ## 禁止停机
+                if t <= T0 + config["禁止时段"]
+                    @constraint(m,down[x,t] == 0)
+                end
+                ## 机组技术约束
                 @constraint(m,Pg[x,t] <= (1-cold[x,t])*param[x]["Pmax"])# 技术出力上限
                 @constraint(m,Pg[x,t] >= hot[x,t]*param[x]["Pmin"])# 技术出力下限
                 @constraint(m,PMg[x,t] <= Pg[x,t] + hot[x,t] * param[x]["Pmax"])
@@ -439,11 +474,18 @@ function UC()::Cint
                 else
                     @constraint(m,up[x,t] - down[x,t] == st[x,t] - param[x]["running"])
                 end
+                if param[x]["running"] == 1 && t <= 12
+                    @constraint(m,up[x,t] == 0)
+                end
+                if param[x]["running"] == 0 && t <= 0 
+                    @constraint(m,up[x,t] == 0)
+                    @constraint(m,down[x,t] == 0)
+                end
                 @constraint(m,up[x,t] + down[x,t] <= 1)
-                @constraint(m,up[x,t] <= 1 - sum(down[x,t-s] for s in 0:min(t-1,16)))#停机后间隔四个小时才能开机
-                @constraint(m,down[x,t] <= 1 - sum(up[x,t-s] for s in 0:min(t-1,32)))#开机后间隔四个小时才能停机
-                @constraint(m, hot[x,t] == st[x,t] - sum(up[x,t-s] for s in 0:min(t-1,3)))#启动好了
-                @constraint(m, cold[x,t] == 1 - st[x,t] - sum(down[x,t-s] for s in 0:min(t-1,3)))#停好了
+                @constraint(m,up[x,t] <= 1 - sum(down[x,t-s] for s in 0:min(t-T0,20)))#停机后间隔四个小时才能开机
+                @constraint(m,down[x,t] <= 1 - sum(up[x,t-s] for s in 0:min(t-T0,20)))#开机后间隔四个小时才能停机
+                @constraint(m, hot[x,t] == st[x,t] - sum(up[x,t-s] for s in 0:min(t-T0,3)))#启动好了
+                @constraint(m, cold[x,t] == 1 - st[x,t] - sum(down[x,t-s] for s in 0:min(t-T0,3)))#停好了
             end
             ### 机组约束
             # ## 煤机总体约束
@@ -473,137 +515,223 @@ function UC()::Cint
                 @constraint(m,rho <= reserve[t])
             end
         end
-        for x in keys(param)# TODO: 启停机的额外要求
-            # if param[x]["是否过夜"] == 1
-            #     @constraint(m,sum(up[x,t] for t in 1:T) == 0)
-            #     @constraint(m,sum(down[x,t] for t in 1:T) == 0)
-            # else
-            @constraint(m,sum(up[x,t] for t in 1:T) <= config["最多启停次数"]) #日间限制启动次数
-        end
+        # for x in keys(param)# TODO: 启停机的额外要求
+        #     # if param[x]["是否过夜"] == 1
+        #     #     @constraint(m,sum(up[x,t] for t in 1:T) == 0)
+        #     #     @constraint(m,sum(down[x,t] for t in 1:T) == 0)
+        #     # else
+        #     @constraint(m,sum(up[x,t] for t in 1:T) <= config["最多启停次数"]) #日间限制启动次数
+        # end
         for p in keys(plant) #总气量约束
-            println(plant[p]["remained_gas"])
-            @constraint(m,0.1*sum(Pg[x,t]*0.25*param[x]["单耗"] for x in plant[p]["units"] for t in T0:32) + dg1[p] == plant[p]["remained_gas"])
+            @constraint(m,0.1*sum(Pg[x,t]*0.25*param[x]["单耗"] for x in plant[p]["units"] for t in T0:32) + dg1_plus[p] - dg1_minus[p] == plant[p]["remained_gas"])
             @constraint(m,0.1*sum(Pg[x,t]*0.25*param[x]["单耗"] for x in plant[p]["units"] for t in 33:T) + dg2[p] == plant[p]["total_gas"])
-            # push!(gas_cons_ref,con)
         end
-        @objective(m,Min,10000*0.25*sum(loadcut[t] for t in T0:96) + 5000*0.25*sum(loadcut[t] for t in 97:T)+ sum(windcut) + 0.1*sum(dPg) + 100*sum(st) + 10000*sum(dg1)+ 10000*sum(dg2))
+        #挪气平衡约束
+        if config["凌晨挪气"]
+            @constraint(m,sum(dg1_plus) - sum(dg1_minus) + dg_total_plus - dg_total_minus == 0)
+            for p in keys(plant)
+                @constraint(m,dg1_indicator[p] >= (dg1_plus[p] + dg1_minus[p])/1000)
+            end
+            @objective(m,Min,10000*0.25*sum(loadcut[t] for t in T0:96) + 
+                        5000*0.25*sum(loadcut[t] for t in 97:T) + 
+                        # 0.1*sum(dPg) + 
+                        20000 * (dg_total_minus + dg_total_plus) + 
+                        1000 * sum(dg1_indicator) + 
+                        1*sum(st) + 
+                        sum(up[x,t]*ST_COST[mod(t,96)+1] for t in T0:T for x in keys(param)) + 
+                        sum(windcut) + 
+                        20000*sum(dg2))
+        else
+            @objective(m,Min,10000*0.25*sum(loadcut[t] for t in T0:96) + 
+            5000*0.25*sum(loadcut[t] for t in 97:T) + 
+            # 0.1*sum(dPg) + 
+            1*sum(st) + 
+            sum(up[x,t]*ST_COST[mod(t,96)+1] for t in T0:T for x in keys(param)) + 
+            sum(windcut) + 
+            20000*sum(dg1_plus)+ 
+            20000*sum(dg1_minus)+ 
+            20000*sum(dg2))
+        end
+        # @objective(m,Min,10000*0.25*sum(loadcut[t] for t in T0:96) + 
+        #             5000*0.25*sum(loadcut[t] for t in 97:T) + 
+        #             sum(windcut) + 
+        #             10000*sum(dg1) + 
+        #             10000*sum(dg2))
         set_time_limit_sec(m, config["maxTimeforUC"])
         if config["logUC"]
             optimize!(m)
         else
             @suppress_out optimize!(m)
         end
-        TT = [(T-4*OFFSET+t-1)%96 + 1 for t in 1:T]
         df = DataFrame()
-        df[!,"时刻"] = [next_day + Minute(t*15) for t in 1:T]
-        df[!,"煤机最大发电能力"] = [COAL_PMAX for t in TT]
-        df[!,"煤机最小发电能力"] = [COAL_PMIN for t in TT]
-        df[!,"燃机最大发电能力"] = Int.(round.([sum(value(PMg[x,t]) for x in keys(param)) for t in TT]))
-        df[!,"水电"] = [WATER for t in TT]
-        df[!,"核电"] = [nuclear[t] for t in TT]
-        df[!,"风电"] = [wind[t] for t in TT]
-        df[!,"光伏"] = [solar[t] for t in TT]
-        df[!,"受电"] = [ext[t] for t in TT]
-        df[!,"统调负荷"] = [load[t] for t in TT]
-        df[!,"正备用"] = Int.(round.([value(reserve[t]) + RESERVE for t in TT]))
-        df[!,"负备用"] = Int.(round.([value(neg_reserve[t]) for t in TT]))
-        df[!,"燃机总出力"] = Int.(round.([sum(value(Pg[x,t]) for x in keys(param)) for t in TT]))
+        df[!,"时刻"] = [next_day + Minute(t*15) for t in T0:T]
+        df[!,"煤机最大发电能力"] = [COAL_PMAX for t in T0:T]
+        df[!,"煤机最小发电能力"] = [COAL_PMIN for t in T0:T]
+        df[!,"燃机最大发电能力"] = Int.(round.([sum(value(PMg[x,t]) for x in keys(param)) for t in T0:T]))
+        df[!,"水电"] = [WATER for t in T0:T]
+        df[!,"核电"] = [t >= 1 ? nuclear[t] : nuclear0[96+t] for t in T0:T]
+        df[!,"风电"] = [t >= 1 ? wind[t] : wind0[96+t] for t in T0:T]
+        df[!,"光伏"] = [t >= 1 ? solar[t] : solar0[96+t] for t in T0:T]
+        df[!,"受电"] = [t >= 1 ? ext[t] : ext0[96+t] for t in T0:T]
+        df[!,"统调负荷"] =[t >= 1 ? load[t] : load0[96+t] for t in T0:T]
+        df[!,"正备用"] = Int.(round.([value(reserve[t]) + RESERVE for t in T0:T]))
+        df[!,"负备用"] = Int.(round.([value(neg_reserve[t]) for t in T0:T]))
+        df[!,"燃机总出力"] = Int.(round.([sum(value(Pg[x,t]) for x in keys(param)) for t in T0:T]))
         for x in ordered_unit
-            df[!,x] = Int.(round.([value(Pg[x,t]) for t in TT]))
+            df[!,x] = Int.(round.([value(Pg[x,t]) for t in T0:T]))
         end
         df2 = DataFrame()
-        df2[!,"燃气电厂"] = [alias_to_full[p]["输出名称"] for p in keys(plant)]
+        df2[!,"燃气电厂"] = [parameters[p]["输出名称"] for p in keys(plant)]
         df2[!,"计划气量"] = [plant[p]["total_gas"] for p in keys(plant)]
         df3 = DataFrame()
-        df3[!,"时刻"] = [Dates.format(next_day + Minute(t*15),dateformat"yyyy-mm-dd HH:MM:SS") for t in 1:T]
+        df3[!,"时刻"] = [Dates.format(next_day + Minute(t*15),dateformat"yyyy-mm-dd HH:MM:SS") for t in T0:T]
         for x in ordered_unit
-            df3[!,param[x]["输出名称"]] = Int.(round.([value(Pg[x,t]) for t in TT]))
+            df3[!,param[x]["输出名称"]] = Int.(round.([value(Pg[x,t]) for t in T0:T]))
         end
         println("优化成功！")
         println("备用最低值为$(minimum(value.(reserve)) + RESERVE)")
+        println("================================================")
+        println("当日/次日凌晨燃机计划：")
+        for p in keys(plant)
+            if sum(param[x]["running"] for x in plant[p]["units"]) == 0
+                continue
+            end
+            print("$p ：")
+            if value(dg1_plus[p]) + value(dg1_minus[p]) >= 0.6
+                if value(dg1_plus[p]) > 0
+                    print("（减少$(Int(round(value(dg1_plus[p]))))万方）:")
+                else 
+                    print("（增加$(Int(round(value(dg1_minus[p]))))万方）:")
+                end
+            end
+            println()
+            for x in plant[p]["units"]
+                if param[x]["running"] == 1
+                    print("    $(x[end-2:end]) ")
+                    if sum(value(down[x,t]) for t in T0:32) >= 1
+                        for t in T0:32
+                            if round(value(down[x,t])) == 1
+                                dt = Dates.format(next_day + Minute(t*15),"HH:MM")
+                                if t <= 0
+                                    print("当日$dt 停机")
+                                else
+                                    print("凌晨$dt 停机")
+                                end
+                            end
+                        end
+                    else
+                        print("凌晨过夜运行")
+                    end
+                    println()
+                end
+            end
+        end
+        println("================================================")
+        println("次日燃机开机计划")
+        for p in keys(plant)
+            if sum(value(up[x,t]) for x in plant[p]["units"] for t in 1:96) >= 1
+                println("$p ：")
+                for x in plant[p]["units"]
+                    print("     $(x[end-2:end])  ")
+                    for t in 1:96
+                        if round(value(up[x,t])) == 1
+                            dt = Dates.format(next_day + Minute(t*15) + Hour(1),"HH:MM")
+                            print("$dt 带足   ")   
+                        end
+                    end
+                    for t in 32:T
+                        if round(value(down[x,t])) == 1
+                            dt = Dates.format(next_day + Minute(t*15),"HH:MM")
+                            print("$dt 停机")   
+                        end
+                    end
+                    print("\n")
+                end
+            end
+        end
         # plants_keys = collect(keys(plant))
         # for i in 1:length(plants_keys)
         #     println("$(plants_keys[i]) 的气量影子价格为:$(dual(gas_cons_ref[i]))")
         # end
-        println("明日备用情况：按（手填）曲线考虑")
-        for (timeslot,t1,t2) in zip(["凌晨","早峰","午峰","晚峰"],[1,28,44,68],[27,43,67,96])
-            tmpdf = df[t1:t2,names(df)]
-            lowest,p = findmin(tmpdf[!,"正备用"])
-            tl,tc,tr,te,tso,twi = round(tmpdf[!,"统调负荷"][p]/10),round(tmpdf[!,"煤机最大发电能力"][p]/10),round(tmpdf[!,"燃机总出力"][p]/10),round(tmpdf[!,"受电"][p]/10),round(tmpdf[!,"光伏"][p]/10),round(tmpdf[!,"风电"][p]/10)
-            tmg = round(tmpdf[!,"燃机最大发电能力"][p]/10)
-            lowest_time = Dates.format(tmpdf[!,"时刻"][p],"HH:MM")
-            println("$(timeslot)，$(lowest_time)备用最紧，为$(Int(round(lowest/10)))万千瓦；该时刻，统调负荷$(Int(tl))万千瓦，煤机$(Int(tc))万千瓦，燃机$(Int(tmg))万千瓦，受电$(Int(te))万千瓦，统调光伏$(Int(tso))万千瓦，统调风电$(Int(twi))万千瓦。")
-        end
-        println("明日燃机开机容量$(total_capacity)万千瓦，总气量$(Int(sum(df2[!,"计划气量"])))万方。")
-        for this_plant in gas_plan
-            k = this_plant["plant"]
-            tmpstr = ""
-            gy,ngy = sum(param[x]["是否过夜"] == 1 for x in plant[k]["units"]),sum(param[x]["是否过夜"] == 0 for x in plant[k]["units"])
-            if ngy > 0 
-                tmpstr *= "$(ngy)机日开夜停"
-            end
-            if gy > 0
-                tmpstr *= "$(gy)机过夜"
-            end
-            print("$k $(tmpstr)（$(plant[k]["total_gas"])万方）。")
-            Tplus7 = [(t + 26)%T + 1 for t in 1:T]
-            if length(plant[k]["units"]) == 1
-                x = plant[k]["units"][1]
-                if param[x]["是否过夜"] == 1
-                    load_rate = round(100*sum(value(hot[x,t])*value(Pg[x,t]) for t in 1:T)/(sum(value.(hot[x,:]))*param[x]["Pmax"]))
-                    if load_rate <= 90
-                        print("（需压出力运行）\n")
-                    else
-                        print("\n")
-                    end
-                else
-                    start,stop = findfirst([value(hot[x,t])>0 for t in 1:T]),findlast(([value(hot[x,t])>0 for t in 1:T]))
-                    if isnothing(start)
-                        continue
-                    end
-                    start,stop = df[!,"时刻"][Tplus7[start]],df[!,"时刻"][Tplus7[stop]]
-                    load_rate = round(100*sum(value(hot[x,t])*value(Pg[x,t]) for t in 1:T)/(sum(value.(hot[x,:]))*param[x]["Pmax"]))
-                    if hour(stop) > 8
-                        print("$(Dates.format(start,"HH:MM"))带足--$(Dates.format(stop,"HH:MM"))")
-                    else
-                        print("$(Dates.format(start,"HH:MM"))带足--次日$(Dates.format(stop,"HH:MM"))")
-                    end
-                    if load_rate <= 95
-                        print("（需压出力运行）\n")
-                    else
-                        print("\n")
-                    end
-                end
-            else
-                print("\n")
-                for i in 1:length(plant[k]["units"])
-                    x = plant[k]["units"][i]
-                    if param[x]["是否过夜"] == 1
-                        load_rate = round(100*sum(value(hot[x,t])*value(Pg[x,t]) for t in 1:T)/(sum(value.(hot[x,:]))*param[x]["Pmax"]))
-                        print("     #$(i)机过夜")
-                        if load_rate <= 90
-                            print("（需压出力运行）\n")
-                        else
-                            print("\n")
-                        end
-                    else
-                        start,stop = findfirst([value(hot[x,t])>0 for t in 1:T]),findlast(([value(hot[x,t])>0 for t in 1:T]))
-                        start,stop = df[!,"时刻"][Tplus7[start]],df[!,"时刻"][Tplus7[stop]]
-                        load_rate = round(100*sum(value(hot[x,t])*value(Pg[x,t]) for t in 1:T)/(sum(value.(hot[x,:]))*param[x]["Pmax"]))
-                        if hour(stop) > 8
-                            print("     #$(i)机: $(Dates.format(start,"HH:MM"))带足--$(Dates.format(stop,"HH:MM"))")
-                        else
-                            print("     #$(i)机: $(Dates.format(start,"HH:MM"))带足--次日$(Dates.format(stop,"HH:MM"))")
-                        end
-                        if load_rate <= 90
-                            print("（需压出力运行）\n")
-                        else
-                            print("\n")
-                        end
-                    end
-                end
-            end
-        end
+        # println("明日备用情况：按（手填）曲线考虑")
+        # for (timeslot,t1,t2) in zip(["凌晨","早峰","午峰","晚峰"],[1,28,44,68],[27,43,67,96])
+        #     tmpdf = df[t1:t2,names(df)]
+        #     lowest,p = findmin(tmpdf[!,"正备用"])
+        #     tl,tc,tr,te,tso,twi = round(tmpdf[!,"统调负荷"][p]/10),round(tmpdf[!,"煤机最大发电能力"][p]/10),round(tmpdf[!,"燃机总出力"][p]/10),round(tmpdf[!,"受电"][p]/10),round(tmpdf[!,"光伏"][p]/10),round(tmpdf[!,"风电"][p]/10)
+        #     tmg = round(tmpdf[!,"燃机最大发电能力"][p]/10)
+        #     lowest_time = Dates.format(tmpdf[!,"时刻"][p],"HH:MM")
+        #     println("$(timeslot)，$(lowest_time)备用最紧，为$(Int(round(lowest/10)))万千瓦；该时刻，统调负荷$(Int(tl))万千瓦，煤机$(Int(tc))万千瓦，燃机$(Int(tmg))万千瓦，受电$(Int(te))万千瓦，统调光伏$(Int(tso))万千瓦，统调风电$(Int(twi))万千瓦。")
+        # end
+        # println("明日燃机开机容量$(total_capacity)万千瓦，总气量$(Int(sum(df2[!,"计划气量"])))万方。")
+        # for this_plant in gas_plan
+        #     k = this_plant["plant"]
+        #     tmpstr = ""
+        #     gy,ngy = sum(param[x]["是否过夜"] == 1 for x in plant[k]["units"]),sum(param[x]["是否过夜"] == 0 for x in plant[k]["units"])
+        #     if ngy > 0 
+        #         tmpstr *= "$(ngy)机日开夜停"
+        #     end
+        #     if gy > 0
+        #         tmpstr *= "$(gy)机过夜"
+        #     end
+        #     print("$k $(tmpstr)（$(plant[k]["total_gas"])万方）。")
+        #     Tplus7 = [(t + 26)%T + 1 for t in 1:T]
+        #     if length(plant[k]["units"]) == 1
+        #         x = plant[k]["units"][1]
+        #         if param[x]["是否过夜"] == 1
+        #             load_rate = round(100*sum(value(hot[x,t])*value(Pg[x,t]) for t in 1:T)/(sum(value.(hot[x,:]))*param[x]["Pmax"]))
+        #             if load_rate <= 90
+        #                 print("（需压出力运行）\n")
+        #             else
+        #                 print("\n")
+        #             end
+        #         else
+        #             start,stop = findfirst([value(hot[x,t])>0 for t in 1:T]),findlast(([value(hot[x,t])>0 for t in 1:T]))
+        #             if isnothing(start)
+        #                 continue
+        #             end
+        #             start,stop = df[!,"时刻"][Tplus7[start]],df[!,"时刻"][Tplus7[stop]]
+        #             load_rate = round(100*sum(value(hot[x,t])*value(Pg[x,t]) for t in 1:T)/(sum(value.(hot[x,:]))*param[x]["Pmax"]))
+        #             if hour(stop) > 8
+        #                 print("$(Dates.format(start,"HH:MM"))带足--$(Dates.format(stop,"HH:MM"))")
+        #             else
+        #                 print("$(Dates.format(start,"HH:MM"))带足--次日$(Dates.format(stop,"HH:MM"))")
+        #             end
+        #             if load_rate <= 95
+        #                 print("（需压出力运行）\n")
+        #             else
+        #                 print("\n")
+        #             end
+        #         end
+        #     else
+        #         print("\n")
+        #         for i in 1:length(plant[k]["units"])
+        #             x = plant[k]["units"][i]
+        #             if param[x]["是否过夜"] == 1
+        #                 load_rate = round(100*sum(value(hot[x,t])*value(Pg[x,t]) for t in 1:T)/(sum(value.(hot[x,:]))*param[x]["Pmax"]))
+        #                 print("     #$(i)机过夜")
+        #                 if load_rate <= 90
+        #                     print("（需压出力运行）\n")
+        #                 else
+        #                     print("\n")
+        #                 end
+        #             else
+        #                 start,stop = findfirst([value(hot[x,t])>0 for t in 1:T]),findlast(([value(hot[x,t])>0 for t in 1:T]))
+        #                 start,stop = df[!,"时刻"][Tplus7[start]],df[!,"时刻"][Tplus7[stop]]
+        #                 load_rate = round(100*sum(value(hot[x,t])*value(Pg[x,t]) for t in 1:T)/(sum(value.(hot[x,:]))*param[x]["Pmax"]))
+        #                 if hour(stop) > 8
+        #                     print("     #$(i)机: $(Dates.format(start,"HH:MM"))带足--$(Dates.format(stop,"HH:MM"))")
+        #                 else
+        #                     print("     #$(i)机: $(Dates.format(start,"HH:MM"))带足--次日$(Dates.format(stop,"HH:MM"))")
+        #                 end
+        #                 if load_rate <= 90
+        #                     print("（需压出力运行）\n")
+        #                 else
+        #                     print("\n")
+        #                 end
+        #             end
+        #         end
+        #     end
+        # end
         println("请将结果文件保存至本地...")
         save_file_name = save_file("";filterlist="xlsx")
         # save_file_name = save_dialog("结果保存至...", GtkNullContainer(), (GtkFileFilter("*.xlsx", name="All supported formats"), "*.xlsx"))
@@ -620,5 +748,9 @@ function UC()::Cint
         print(s)
         return 0
     end
+end
+function Main()::Cint
+    
+    return 0
 end
 end # module  
