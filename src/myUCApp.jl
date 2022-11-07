@@ -280,7 +280,7 @@ function UC()::Cint
         plant = Dict()
         ordered_unit = []
         # 获取燃气电厂当前气量
-        scada_today = XLSX.readtable("assets\\燃机名称表.xlsx","当日量测")
+        scada_today = XLSX.readtable("assets/燃机名称表.xlsx","当日量测")
         for i in 2:length(scada_today[2])
             k = String(scada_today[2][i])#解析出来是Symbol，转化成为String
             remained_gas,current_power = scada_today[1][i][3],scada_today[1][i][5]
