@@ -237,7 +237,6 @@ function UC()::Cint
             return v == "高峰电量"
         end
         NOW = Int(ceil(hour(now())*4 + minute(now())/15))
-        NOW = 64
         # filename = "assets/日前计划编制报表20220721.xlsx"
         #获取当前超短期数据
         today_schedule = DataFrame(XLSX.readtable("assets/today_schedule.xlsx",1,"B:K";
@@ -754,7 +753,7 @@ function UC()::Cint
         # XLSX.writetable(save_file_name,df;overwrite=true)
         XLSX.writetable(save_file_name,"REPORT_A"=>df,"REPORT_B"=>df2,"REPORT_C"=>permutedims(df3,"时刻");overwrite=true)
         println("流程结束，按回车键退出...")
-        s = readline()
+        readline()
         return 0# if things finished successfully
     catch err
         showerror(stdout, err, catch_backtrace())
