@@ -242,8 +242,9 @@ function UC()::Cint
         #获取当前超短期数据
         today_schedule = DataFrame(XLSX.readtable("assets/today_schedule.xlsx",1,"B:K";
         first_row=2)...)
-        println("请选择日前计划文件（仅支持xlsx格式）！")
-        filename = pick_file("";filterlist="xlsx")
+        # println("请选择日前计划文件（仅支持xlsx格式）！")
+        # filename = pick_file("";filterlist="xlsx")
+        filename = "assets/next_day_schedule.xlsx"
         next_day_schedule = DataFrame(XLSX.readtable(filename,1,"A:EG";
         first_row=3,stop_in_row_function=myfun)...)
         next_day_string = replace(split(XLSX.readdata(filename,1,"AJ2"))[1],r"[年月日]"=>"")
@@ -748,9 +749,5 @@ function UC()::Cint
         print(s)
         return 0
     end
-end
-function Main()::Cint
-    
-    return 0
 end
 end # module  
