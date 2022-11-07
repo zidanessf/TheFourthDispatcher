@@ -352,6 +352,21 @@ function UC()::Cint
                 end
             end    
         end
+        for k in keys(plant)
+            if length(plant[k]["units"]) == 0
+                for i in 1:plant[k]["running_units"]
+                    param["$k#$(i)机"] = Dict()
+                    param["$k#$(i)机"]["Pmax"] = parameters[k]["Pmax"]
+                    param["$k#$(i)机"]["Pmin"] = parameters[k]["Pmin"]
+                    param["$k#$(i)机"]["单耗"] = parameters[k]["unit_gas"]
+                    param["$k#$(i)机"]["输出名称"] = parameters[k]["输出名称"] * "#$(i)机"
+                    param["$k#$(i)机"]["running"] = 1
+                    param["$k#$(i)机"]["是否过夜"] = 0
+                    push!(plant[k]["units"],"$k#$(i)机")
+                    push!(ordered_unit,"$k#$(i)机")
+                end
+            end 
+        end
         T = 96 + 32
         T0 = NOW - 96
         df = DataFrame()
@@ -740,7 +755,6 @@ function UC()::Cint
         XLSX.writetable(save_file_name,"REPORT_A"=>df,"REPORT_B"=>df2,"REPORT_C"=>permutedims(df3,"时刻");overwrite=true)
         println("流程结束，按回车键退出...")
         s = readline()
-        print(s)
         return 0# if things finished successfully
     catch err
         showerror(stdout, err, catch_backtrace())
