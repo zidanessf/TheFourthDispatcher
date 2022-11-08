@@ -236,11 +236,12 @@ function UC()::Cint
             v = r[:时间]
             return v == "高峰电量"
         end
-        NOW = Int(ceil(hour(now())*4 + minute(now())/15))
+        # NOW = Int(ceil(hour(now())*4 + minute(now())/15))
+        NOW = 75
         # filename = "assets/日前计划编制报表20220721.xlsx"
         #获取当前超短期数据
         today_schedule = DataFrame(XLSX.readtable("assets/today_schedule.xlsx",1,"B:K";
-        first_row=2)...)
+        first_row=2)...)[2:end,:]
         # println("请选择日前计划文件（仅支持xlsx格式）！")
         # filename = pick_file("";filterlist="xlsx")
         filename = "assets/next_day_schedule.xlsx"
@@ -254,7 +255,7 @@ function UC()::Cint
         gas_plan_string = collect(eachmatch(re,row_string))[1].match
         total_capacity = match(r"燃机开机容量(?P<total>\d*)万千瓦",gas_plan_string)["total"]
         # gas_plan = collect(eachmatch(r"[\u4e00-\u9fa5]*[1-9]{1}[机组]",gas_plan_string))
-        gas_plan = collect(eachmatch(r"(?P<plant>[\u4e00-\u9fa5]*)(?P<plan>[1-9]{1}[机组][^，]*)（(?P<gas>\d*)万方",gas_plan_string))
+        gas_plan = collect(eachmatch(r"(?P<plant>[\u4e00-\u9fa5]*)(?P<plan>[1-9]{1}[机组][^，]*)[（\(](?P<gas>\d*)万方",gas_plan_string))
         # gas_plan_tmp = [[c for c in x.match] for x in gas_plan]
         # gas_plan_unpack = Array([(join(x[1:end-2],""),parse(Int,x[end-1])) for x in gas_plan_tmp])
         namemap = DataFrame(XLSX.readtable("assets/燃机名称表.xlsx","别名","A:B")...)
@@ -283,7 +284,7 @@ function UC()::Cint
         scada_today = XLSX.readtable("assets/燃机名称表.xlsx","当日量测")
         for i in 2:length(scada_today[2])
             k = String(scada_today[2][i])#解析出来是Symbol，转化成为String
-            remained_gas,current_power = scada_today[1][i][3],scada_today[1][i][5]
+            remained_gas,current_power = scada_today[1][i][4],scada_today[1][i][6]
             if round(current_power/parameters[k]["Pmax"]) >= 1
                 plant[k] = Dict()
                 plant[k]["total_gas"] = 0
@@ -387,9 +388,9 @@ function UC()::Cint
         readline()
         required_uc = DataFrame(XLSX.readtable("assets/必开燃机列表.xlsx",1)...)
         # println([x for x in keys(param) if param[x]["running"]])
-        # for p in keys(plant)
-        #     println(plant[p])
-        # end
+        for p in keys(plant)
+            println("$(p)当前剩余气量$(round(plant[p]["remained_gas"];digits=1))万方")
+        end
         # ## 必开燃机中过夜
         # for x in keys(param)
         #     if !ismissing(sum(required_uc[!,x]))
@@ -563,8 +564,8 @@ function UC()::Cint
             1*sum(st) + 
             sum(up[x,t]*ST_COST[mod(t,96)+1] for t in T0:T for x in keys(param)) + 
             sum(windcut) + 
-            20000*sum(dg1_plus)+ 
-            20000*sum(dg1_minus)+ 
+            200000*sum(dg1_plus) + 
+            200000*sum(dg1_minus) + 
             20000*sum(dg2))
         end
         # @objective(m,Min,10000*0.25*sum(loadcut[t] for t in T0:96) + 
@@ -611,12 +612,12 @@ function UC()::Cint
             if sum(param[x]["running"] for x in plant[p]["units"]) == 0
                 continue
             end
-            print("$p ：")
+            print("$p:  ")
             if value(dg1_plus[p]) + value(dg1_minus[p]) >= 0.6
                 if value(dg1_plus[p]) > 0
-                    print("（减少$(Int(round(value(dg1_plus[p]))))万方）:")
+                    print("（减少$(Int(round(value(dg1_plus[p]))))万方）")
                 else 
-                    print("（增加$(Int(round(value(dg1_minus[p]))))万方）:")
+                    print("（增加$(Int(round(value(dg1_minus[p]))))万方）")
                 end
             end
             println()
@@ -628,9 +629,9 @@ function UC()::Cint
                             if round(value(down[x,t])) == 1
                                 dt = Dates.format(next_day + Minute(t*15),"HH:MM")
                                 if t <= 0
-                                    print("当日$dt 停机")
+                                    print("当日$(dt)停机")
                                 else
-                                    print("凌晨$dt 停机")
+                                    print("凌晨$(dt)停机")
                                 end
                             end
                         end
@@ -645,19 +646,21 @@ function UC()::Cint
         println("次日燃机开机计划")
         for p in keys(plant)
             if sum(value(up[x,t]) for x in plant[p]["units"] for t in 1:96) >= 1
-                println("$p ：")
+                println("$p ：$(plant[p]["total_gas"])万方")
                 for x in plant[p]["units"]
                     print("     $(x[end-2:end])  ")
-                    for t in 1:96
+                    for t in 1:T
                         if round(value(up[x,t])) == 1
-                            dt = Dates.format(next_day + Minute(t*15) + Hour(1),"HH:MM")
-                            print("$dt 带足   ")   
+                            if t <= 96
+                                dt = Dates.format(next_day + Minute(t*15) + Hour(1),"HH:MM")
+                                print("$(dt)带足----") 
+                            end
                         end
-                    end
-                    for t in 32:T
                         if round(value(down[x,t])) == 1
-                            dt = Dates.format(next_day + Minute(t*15),"HH:MM")
-                            print("$dt 停机")   
+                            if t >= 32
+                                dt = Dates.format(next_day + Minute(t*15),"HH:MM")
+                                print("$(dt)停机    ")
+                            end
                         end
                     end
                     print("\n")
