@@ -1,5 +1,5 @@
 module myUCApp
-using JuMP,DataFrames,CPLEX,XLSX,Dates,Suppressor,JSON,NativeFileDialog,UnicodePlots
+using JuMP,DataFrames,CPLEX,XLSX,Dates,Suppressor,JSON,NativeFileDialog,UnicodePlots,PrettyTables
 export UC
 function UC()::Cint
     try
@@ -314,6 +314,9 @@ function UC()::Cint
         #     # else
         #     @constraint(m,sum(up[x,t] for t in 1:T) <= config["最多启停次数"]) #日间限制启动次数
         # end
+        for x in keys(param)
+            @constraint(m,sum(up[x,t] for t in 1:96) <= config["最多启停次数"]) #日间限制启动次数
+        end
         for p in keys(plant) #总气量约束
             @constraint(m,0.1*sum(Pg[x,t]*0.25*param[x]["单耗"] for x in plant[p]["units"] for t in T0:32) + dg1_plus[p] - dg1_minus[p] == plant[p]["remained_gas"])
             @constraint(m,0.1*sum(Pg[x,t]*0.25*param[x]["单耗"] for x in plant[p]["units"] for t in 33:T) + dg2[p] == plant[p]["total_gas"])
@@ -377,9 +380,9 @@ function UC()::Cint
         df2[!,"燃气电厂"] = [parameters[p]["输出名称"] for p in keys(plant)]
         df2[!,"计划气量"] = [plant[p]["total_gas"] for p in keys(plant)]
         df3 = DataFrame()
-        df3[!,"时刻"] = [Dates.format(next_day + Minute(t*15),dateformat"yyyy-mm-dd HH:MM:SS") for t in T0:T]
+        df3[!,"时刻"] = [Dates.format(next_day + Minute(t*15),dateformat"yyyy-mm-dd HH:MM:SS") for t in 1:96]
         for x in ordered_unit
-            df3[!,param[x]["输出名称"]] = Int.(round.([value(Pg[x,t]) for t in T0:T]))
+            df3[!,param[x]["输出名称"]] = Int.(round.([value(Pg[x,t]) for t in 1:96]))
         end
         println("优化成功！")
         println("备用最低值为$(minimum(value.(reserve)))")
@@ -434,9 +437,13 @@ function UC()::Cint
                             end
                         end
                         if round(value(down[x,t])) == 1
-                            if t >= 32
+                            if t >= 33
                                 dt = Dates.format(next_day + Minute(t*15),"HH:MM")
-                                print("$(dt)停机    ")
+                                if t<=95
+                                    print("$(dt)停机    ")
+                                else
+                                    print("后一日$(dt)停机    ")
+                                end
                             end
                         end
                     end
@@ -444,15 +451,16 @@ function UC()::Cint
                 end
             end
         end
+
         println("================================================")
-        println("旋备情况")
+        println("当前至次日24点旋备曲线")
         plt = lineplot(T0:T, df[!,"正备用"], name="optimized",
             xlabel="time", ylabel="spinning reserve(MW)", canvas=DotCanvas, border=:ascii,xlim=(T0,T))
         lineplot!(plt, T0:T, [RESERVE0 for t in T0:T], name="required",
         color=:cyan)
         display(plt)
         println("================================================")
-        println("燃机备用情况")
+        println("当前至次日24点燃机备用情况")
         plt2 = lineplot(T0:T,df[!,"燃机最大发电能力"], name="optimized",
         xlabel="time", ylabel="spinning reserve(MW)", canvas=DotCanvas, border=:ascii,xlim=(T0,T))
         lineplot!(plt2,T0:T,max.((df[!,"燃机最大发电能力"] - df[!,"正备用"] .+ RESERVE0),0), name="required",
@@ -463,14 +471,21 @@ function UC()::Cint
         #     println("$(plants_keys[i]) 的气量影子价格为:$(dual(gas_cons_ref[i]))")
         # end
         # println("明日备用情况：按（手填）曲线考虑")
-        # for (timeslot,t1,t2) in zip(["凌晨","早峰","午峰","晚峰"],[1,28,44,68],[27,43,67,96])
-        #     tmpdf = df[t1:t2,names(df)]
-        #     lowest,p = findmin(tmpdf[!,"正备用"])
-        #     tl,tc,tr,te,tso,twi = round(tmpdf[!,"统调负荷"][p]/10),round(tmpdf[!,"煤机最大发电能力"][p]/10),round(tmpdf[!,"燃机总出力"][p]/10),round(tmpdf[!,"受电"][p]/10),round(tmpdf[!,"光伏"][p]/10),round(tmpdf[!,"风电"][p]/10)
-        #     tmg = round(tmpdf[!,"燃机最大发电能力"][p]/10)
-        #     lowest_time = Dates.format(tmpdf[!,"时刻"][p],"HH:MM")
-        #     println("$(timeslot)，$(lowest_time)备用最紧，为$(Int(round(lowest/10)))万千瓦；该时刻，统调负荷$(Int(tl))万千瓦，煤机$(Int(tc))万千瓦，燃机$(Int(tmg))万千瓦，受电$(Int(te))万千瓦，统调光伏$(Int(tso))万千瓦，统调风电$(Int(twi))万千瓦。")
-        # end
+        df_new = df[2-T0:97-T0,names(df)]
+        data = []
+        println("================================================")
+        println("次日备用最紧张时段分析")
+        for (timeslot,t1,t2) in zip(["凌晨","早峰","午峰","晚峰"],[1,28,44,72],[27,43,71,96])
+            tmpdf = df_new[t1:t2,names(df)]
+            lowest,p = findmin(tmpdf[!,"正备用"])
+            tl,tc,tr,te,tso,twi = round(tmpdf[!,"统调负荷"][p]/10),round(tmpdf[!,"煤机最大发电能力"][p]/10),round(tmpdf[!,"燃机总出力"][p]/10),round(tmpdf[!,"受电"][p]/10),round(tmpdf[!,"光伏"][p]/10),round(tmpdf[!,"风电"][p]/10)
+            tmg = round(tmpdf[!,"燃机最大发电能力"][p]/10)
+            lowest_time = Dates.format(tmpdf[!,"时刻"][p],"HH:MM")
+            push!(data,permutedims([timeslot,lowest_time,lowest,Int(tl),Int(tc),Int(tmg),Int(te),Int(tso),Int(twi)]))
+            # println("$(timeslot)，$(lowest_time)备用最紧，为$(Int(round(lowest/10)))万千瓦；该时刻，统调负荷$(Int(tl))万千瓦，煤机$(Int(tc))万千瓦，燃机$(Int(tmg))万千瓦，受电$(Int(te))万千瓦，统调光伏$(Int(tso))万千瓦，统调风电$(Int(twi))万千瓦。")
+        end
+        data = vcat(data...)
+        pretty_table(data;header=(["时段","时刻","正备用","统调负荷","燃煤","燃气","受电","光伏","风电"],["","","(万kW)","(万kW)","(万kW)","(万kW)","(万kW)","(万kW)","(万kW)"]),header_crayon=crayon"yellow bold",tf=tf_unicode_rounded)
         # println("明日燃机开机容量$(total_capacity)万千瓦，总气量$(Int(sum(df2[!,"计划气量"])))万方。")
         # for this_plant in gas_plan
         #     k = this_plant["plant"]
