@@ -225,6 +225,11 @@ function UC()::Cint
                 if !ismissing(required_uc[t-T0+1,x])
                     @constraint(m,st[x,t] == required_uc[t-T0+1,x])
                 end
+                if !PR["允许凌晨起机"]
+                    if ST_COST[mod(t,96)+1] >= 10000
+                        @constraint(m,up[x,t] == 0)
+                    end
+                end
                 ## 禁止停机
                 if t <= T0 + config["禁止时段"]
                     @constraint(m,down[x,t] == 0)
@@ -322,7 +327,6 @@ function UC()::Cint
             @constraint(m,0.1*sum(Pg[x,t]*0.25*param[x]["单耗"] for x in plant[p]["units"] for t in 33:T) + dg2[p] == plant[p]["total_gas"])
         end
         #挪气平衡约束
-
         if config["凌晨挪气"]
             @constraint(m,sum(dg1_plus) - sum(dg1_minus) + dg_total_plus - dg_total_minus == 0)
             for p in keys(plant)
@@ -333,7 +337,7 @@ function UC()::Cint
                         # 0.1*sum(dPg) + 
                         PR["当日气量偏差惩罚"] * (dg_total_minus + dg_total_plus) + 
                         PR["单机挪气惩罚"] * sum(dg1_indicator) + 
-                        1*sum(st) + 
+                        PR["固定成本"]*sum(st) + 
                         sum(up[x,t]*ST_COST[mod(t,96)+1] for t in T0:T for x in keys(param)) + 
                         sum(windcut) + 
                         PR["次日气量富余惩罚"]*sum(dg2))
@@ -341,7 +345,7 @@ function UC()::Cint
             @objective(m,Min,0.25*sum(lackreserve[t] for t in T0:96) + 
             PR["后一日凌晨系数"]*0.25*sum(lackreserve[t] for t in 97:T) + 
             # 0.1*sum(dPg) + 
-            1*sum(st) + 
+            PR["固定成本"]*sum(st) + 
             sum(up[x,t]*ST_COST[mod(t,96)+1] for t in T0:T for x in keys(param)) + 
             sum(windcut) + 
             PR["当日气量偏差惩罚"]*sum(dg1_plus) + 
