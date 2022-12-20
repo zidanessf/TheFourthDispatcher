@@ -96,6 +96,7 @@ function UC()::Cint
                         param["$k#$(n)机"]["单耗"] = parameters[k]["unit_gas"]
                         param["$k#$(n)机"]["输出名称"] = parameters[k]["输出名称"] * "#$(n)机"
                         param["$k#$(n)机"]["是否过夜"] = 0
+                        param["$k#$(n)机"]["次日开机"] = true
                         push!(plant[k]["units"],"$k#$(n)机")
                         push!(ordered_unit,"$k#$(n)机")               
                         if n <= plant[k]["running_units"]
@@ -119,6 +120,7 @@ function UC()::Cint
                         param["$k#$(i)机"]["输出名称"] = parameters[k]["输出名称"] * "#$(i)机"
                         param["$k#$(i)机"]["running"] = 1
                         param["$k#$(i)机"]["是否过夜"] = 0
+                        param["$k#$(n)机"]["次日开机"] = false
                         push!(plant[k]["units"],"$k#$(i)机")
                         push!(ordered_unit,"$k#$(i)机")
                     end
@@ -135,6 +137,7 @@ function UC()::Cint
                     param["$k#$(i)机"]["输出名称"] = parameters[k]["输出名称"] * "#$(i)机"
                     param["$k#$(i)机"]["running"] = 1
                     param["$k#$(i)机"]["是否过夜"] = 0
+                    param["$k#$(n)机"]["次日开机"] = false
                     push!(plant[k]["units"],"$k#$(i)机")
                     push!(ordered_unit,"$k#$(i)机")
                 end
@@ -230,8 +233,12 @@ function UC()::Cint
                         @constraint(m,up[x,t] == 0)
                     end
                 end
+                ## 次日启动机组最大连续停机时间约束
+                if t <= T - 64
+                    @constraint(m,sum(st[x,s] for s in t:t+64) >= 1)
+                end
                 ## 禁止停机
-                if t <= T0 + config["禁止时段"]
+                if t <= T0 + config["禁止时段"]#提出预调度框架。适用于不同市场阶段。
                     @constraint(m,down[x,t] == 0)
                 end
                 ## 机组技术约束
