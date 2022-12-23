@@ -120,7 +120,7 @@ function UC()::Cint
                         param["$k#$(i)机"]["输出名称"] = parameters[k]["输出名称"] * "#$(i)机"
                         param["$k#$(i)机"]["running"] = 1
                         param["$k#$(i)机"]["是否过夜"] = 0
-                        param["$k#$(n)机"]["次日开机"] = false
+                        param["$k#$(i)机"]["次日开机"] = false
                         push!(plant[k]["units"],"$k#$(i)机")
                         push!(ordered_unit,"$k#$(i)机")
                     end
@@ -137,7 +137,7 @@ function UC()::Cint
                     param["$k#$(i)机"]["输出名称"] = parameters[k]["输出名称"] * "#$(i)机"
                     param["$k#$(i)机"]["running"] = 1
                     param["$k#$(i)机"]["是否过夜"] = 0
-                    param["$k#$(n)机"]["次日开机"] = false
+                    param["$k#$(i)机"]["次日开机"] = false
                     push!(plant[k]["units"],"$k#$(i)机")
                     push!(ordered_unit,"$k#$(i)机")
                 end
@@ -234,11 +234,11 @@ function UC()::Cint
                     end
                 end
                 ## 次日启动机组最大连续停机时间约束
-                if t <= T - 64
-                    @constraint(m,sum(st[x,s] for s in t:t+64) >= 1)
+                if t <= T - 64 && t >= 32 && param[x]["次日开机"]
+                    @constraint(m,sum(st[x,s] for s in t:t+52) >= 1)
                 end
                 ## 禁止停机
-                if t <= T0 + config["禁止时段"]#提出预调度框架。适用于不同市场阶段。
+                if t <= T0 + config["禁止时段"]
                     @constraint(m,down[x,t] == 0)
                 end
                 ## 机组技术约束
@@ -396,7 +396,7 @@ function UC()::Cint
             df3[!,param[x]["输出名称"]] = Int.(round.([value(Pg[x,t]) for t in 1:96]))
         end
         println("优化成功！")
-        println("备用最低值为$(minimum(value.(reserve)))")
+        println("正备用最低值为$(minimum(value.(reserve)))")
         println("================================================")
         println("当日/次日凌晨燃机计划：")
         for p in keys(plant)
@@ -485,7 +485,7 @@ function UC()::Cint
         df_new = df[2-T0:97-T0,names(df)]
         data = []
         println("================================================")
-        println("次日备用最紧张时段分析")
+        println("次日正备用最紧张时段分析")
         for (timeslot,t1,t2) in zip(["凌晨","早峰","午峰","晚峰"],[1,28,44,72],[27,43,71,96])
             tmpdf = df_new[t1:t2,names(df)]
             lowest,p = findmin(tmpdf[!,"正备用"])
@@ -497,6 +497,19 @@ function UC()::Cint
         end
         data = vcat(data...)
         pretty_table(data;header=(["时段","时刻","正备用","统调负荷","燃煤","燃气","受电","光伏","风电"],["","","(万kW)","(万kW)","(万kW)","(万kW)","(万kW)","(万kW)","(万kW)"]),header_crayon=crayon"yellow bold",tf=tf_unicode_rounded)
+        println("================================================")
+        data = []
+        println("次日负备用最紧张时段分析")
+        for (timeslot,t1,t2) in zip(["凌晨","早峰","午峰","晚峰"],[1,28,44,72],[27,43,71,96])
+            tmpdf = df_new[t1:t2,names(df)]
+            lowest,p = findmin(tmpdf[!,"负备用"])
+            tl,tc,tr,te,tso,twi = round(tmpdf[!,"统调负荷"][p]/10),round(tmpdf[!,"煤机最小发电能力"][p]/10),round(tmpdf[!,"燃机总出力"][p]/10),round(tmpdf[!,"受电"][p]/10),round(tmpdf[!,"光伏"][p]/10),round(tmpdf[!,"风电"][p]/10)
+            lowest_time = Dates.format(tmpdf[!,"时刻"][p],"HH:MM")
+            push!(data,permutedims([timeslot,lowest_time,lowest,Int(tl),Int(tc),Int(tr),Int(te),Int(tso),Int(twi)]))
+            # println("$(timeslot)，$(lowest_time)备用最紧，为$(Int(round(lowest/10)))万千瓦；该时刻，统调负荷$(Int(tl))万千瓦，煤机$(Int(tc))万千瓦，燃机$(Int(tmg))万千瓦，受电$(Int(te))万千瓦，统调光伏$(Int(tso))万千瓦，统调风电$(Int(twi))万千瓦。")
+        end
+        data = vcat(data...)
+        pretty_table(data;header=(["时段","时刻","负备用","统调负荷","燃煤","燃气","受电","光伏","风电"],["","","(万kW)","(万kW)","(万kW)","(万kW)","(万kW)","(万kW)","(万kW)"]),header_crayon=crayon"yellow bold",tf=tf_unicode_rounded)
         # println("明日燃机开机容量$(total_capacity)万千瓦，总气量$(Int(sum(df2[!,"计划气量"])))万方。")
         # for this_plant in gas_plan
         #     k = this_plant["plant"]
@@ -567,11 +580,39 @@ function UC()::Cint
         #         end
         #     end
         # end
-        println("请将结果文件保存至本地...")
+        println("请将燃机计划保存至本地，保存后手动另存为xls格式，可在停电智能管控平台-调度日计划（手动导入）中上传、通知...")
         save_file_name = save_file("";filterlist="xlsx")
         # save_file_name = save_dialog("结果保存至...", GtkNullContainer(), (GtkFileFilter("*.xlsx", name="All supported formats"), "*.xlsx"))
         # XLSX.writetable(save_file_name,df;overwrite=true)
         XLSX.writetable(save_file_name,"REPORT_A"=>df,"REPORT_B"=>df2,"REPORT_C"=>permutedims(df3,"时刻");overwrite=true)
+        XLSX.openxlsx("assets/次日平衡模板.xlsx",mode="rw") do xf
+            sheet = xf[1]
+            for k in 1:96
+                sheet["B$(k+1)"] = df[k-T0+1,"煤机最大发电能力"]
+                sheet["D$(k+1)"] = df[k-T0+1,"水电"]
+                sheet["E$(k+1)"] = 80
+                sheet["F$(k+1)"] = df[k-T0+1,"核电"]
+                sheet["G$(k+1)"] = df[k-T0+1,"风电"]
+                sheet["G$(k+1)"] = df[k-T0+1,"风电"]
+                sheet["H$(k+1)"] = df[k-T0+1,"光伏"]
+                sheet["I$(k+1)"] = df[k-T0+1,"受电"]
+                sheet["J$(k+1)"] = 0
+                sheet["M$(k+1)"] = 0
+                sheet["L$(k+1)"] = df[k-T0+1,"统调负荷"]
+                sheet["P$(k+1)"] = df[k-T0+1,"煤机最小发电能力"]
+            end
+            for i in 20:50
+                for j in 1:97
+                    sheet[j,i] = missing
+                end
+            end
+            for (j,x) in enumerate(ordered_unit)
+                sheet[1,j+19] = x
+                for i in 1:96
+                    sheet[i+1,j+19] = Int(round(value(Pg[x,i-T0+1])))
+                end
+            end
+        end
         println("流程结束，按回车键退出...")
         s = readline()
         println(s)
