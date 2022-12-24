@@ -609,7 +609,7 @@ function UC()::Cint
             for (j,x) in enumerate(ordered_unit)
                 sheet[1,j+19] = x
                 for i in 1:96
-                    sheet[i+1,j+19] = Int(round(value(Pg[x,i-T0+1])))
+                    sheet[i+1,j+19] = Int(round(value(Pg[x,i])))
                 end
             end
         end
