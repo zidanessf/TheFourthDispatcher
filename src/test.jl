@@ -1,6 +1,6 @@
-# using Revise
+using Revise
 # using UnicodePlots
-include("myUCApp.jl")
+includet("myUCApp.jl")
 using .myUCApp
 # maxReserve()
 UC()

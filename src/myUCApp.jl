@@ -199,11 +199,8 @@ function UC()::Cint
         @variable(m,st[x in keys(param),t in T0:T],binary=true)
         @variable(m,up[x in keys(param),t in T0:T],binary=true)
         @variable(m,down[x in keys(param),t in T0:T],binary=true)
-        @variable(m,hot[x in keys(param),t in T0:T],binary=true)
-        @variable(m,cold[x in keys(param),t in T0:T],binary=true)
-        # @variable(m,UT[x in keys(param),t in 0:T])
-        # @variable(m,DT[x in keys(param),t in 0:T])
         @variable(m,Pg[x in keys(param),t in T0:T],lower_bound=0)
+        @variable(m,pg[x in keys(param),t in T0:T],lower_bound=0)
         @variable(m,dPg[x in keys(param),t in T0:T],lower_bound=0)
         @variable(m,PMg[x in keys(param),t in T0:T],lower_bound=0)
         @variable(m,lackreserve[t in T0:T],lower_bound=0)#正备用缺口惩罚
@@ -233,7 +230,7 @@ function UC()::Cint
                         @constraint(m,up[x,t] == 0)
                     end
                 end
-                ## 次日启动机组最大连续停机时间约束
+                ## 次日启动机组最大连续停机时间约束，夜开日停怎么办，这一条
                 if t <= T - 64 && t >= 32 && param[x]["次日开机"]
                     @constraint(m,sum(st[x,s] for s in t:t+52) >= 1)
                 end
@@ -242,8 +239,9 @@ function UC()::Cint
                     @constraint(m,down[x,t] == 0)
                 end
                 ## 机组技术约束
-                @constraint(m,Pg[x,t] <= (1-cold[x,t])*param[x]["Pmax"])# 技术出力上限
-                @constraint(m,Pg[x,t] >= hot[x,t]*param[x]["Pmin"])# 技术出力下限
+                @constraint(m,Pg[x,t] == pg[x,t] + param[x]["Pmin"])
+                @constraint(m,pg[x,t] <= st[x,t]*(param[x]["Pmax"]-param[x]["Pmin"]))# 技术出力上限
+                # @constraint(m,Pg[x,t] >= st[x,t]*param[x]["Pmin"])# 技术出力下限
                 @constraint(m,PMg[x,t] <= Pg[x,t] + hot[x,t] * param[x]["Pmax"])
                 @constraint(m,PMg[x,t] >= Pg[x,t] - hot[x,t] * param[x]["Pmax"])
                 @constraint(m,PMg[x,t] <= param[x]["Pmax"])
@@ -259,9 +257,11 @@ function UC()::Cint
                 # @constraint(m,Pg[x,t] >= (4-DT[x,t])/4 * param[x]["Pmin"] - cold[x,t]*10000 - st[x,t]*10000)
                 # @constraint(m,Pg[x,t] <= (4-DT[x,t])/4 * param[x]["Pmin"] + cold[x,t]*10000 + st[x,t]*10000)
                 # #
-                if t >= T0+1 #爬坡率约束
+                if t >= T0+1 #爬坡率约束，附带启、停机曲线
                     @constraint(m,Pg[x,t] - Pg[x,t-1] <= hot[x,t-1]*param[x]["Pmax"]/3 + (1-hot[x,t-1])*param[x]["Pmin"]/4)
                     @constraint(m,Pg[x,t-1] - Pg[x,t] <= hot[x,t-1]*param[x]["Pmax"]/3 + (1-hot[x,t-1])*param[x]["Pmin"]/4)
+                    # @constraint(m,Pg[x,t] - Pg[x,t-1] <= param[x]["Pmax"]/3)
+                    # @constraint(m,Pg[x,t-1] - Pg[x,t] <= param[x]["Pmax"]/3)
                 # else
                 #     if param[x]["running"] == 0
                 #         @constraint(m,Pg[x,t] <= hot[x,t]*param[x]["Pmax"]/3 + (1-hot[x,t])*param[x]["Pmin"]/4)
@@ -341,7 +341,7 @@ function UC()::Cint
             end
             @objective(m,Min,0.25*sum(lackreserve[t] for t in T0:96) + 
                         PR["后一日凌晨系数"]*0.25*sum(lackreserve[t] for t in 97:T) + 
-                        # 0.1*sum(dPg) + 
+                        0.1*sum(dPg) + 
                         PR["当日气量偏差惩罚"] * (dg_total_minus + dg_total_plus) + 
                         PR["单机挪气惩罚"] * sum(dg1_indicator) + 
                         PR["固定成本"]*sum(st) + 
