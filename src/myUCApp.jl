@@ -161,7 +161,7 @@ function UC()::Cint
         else
             run(`open ./assets/必开燃机列表.xlsx`)
         end
-        readline()
+        # readline()
         required_uc = DataFrame(XLSX.readtable("assets/必开燃机列表.xlsx",1)...)
         # println([x for x in keys(param) if param[x]["running"]])
         for p in keys(plant)
