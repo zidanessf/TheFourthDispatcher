@@ -241,10 +241,10 @@ function UC()::Cint
                 end
                 ## 机组技术约束
                 @constraint(m,Pg[x,t] == pg[x,t] + param[x]["Pmin"]*st[x,t] + 
-                sum((UTD-s+1)*param[x]["Pmin"]/UTD*up[t+s] for s in 1:min(UTD,T-t))+
-                sum((DTD-s+1)*param[x]["Pmin"]/DTD*down[t-s] for s in 1:min(DTD,t-T0))) #冷态启机怎么考虑
+                sum((UTD-s+1)*param[x]["Pmin"]/UTD*up[x,t+s] for s in 1:min(UTD,T-t))+
+                sum((DTD-s+1)*param[x]["Pmin"]/DTD*down[x,t-s] for s in 0:min(DTD-1,t-T0))) #冷态启机怎么考虑
                 @constraint(m,pg[x,t] <= st[x,t]*(param[x]["Pmax"]-param[x]["Pmin"]))# 技术出力上限
-                @constraint(m,PMg[x,t] == Pg[x,t] - pg[x,t] + (param[x]["max"]-param[x]["min"])*st[x,t])
+                @constraint(m,PMg[x,t] == Pg[x,t] - pg[x,t] + (param[x]["Pmax"]-param[x]["Pmin"])*st[x,t])
                 if t >= T0+1 #爬坡成本约束
                     @constraint(m,dPg[x,t] >= Pg[x,t] - Pg[x,t-1])
                     @constraint(m,dPg[x,t] >= Pg[x,t-1] - Pg[x,t])
