@@ -239,7 +239,7 @@ function UC()::Cint
                     @constraint(m,down[x,t] == 0)
                 end
                 ## 机组技术约束
-                @constraint(m,Pg[x,t] == pg[x,t] + param[x]["Pmin"])
+                @constraint(m,Pg[x,t] == pg[x,t] + param[x]["Pmin"](up[x,t+1]+st[x,t]) + sum()) #冷态启机怎么考虑
                 @constraint(m,pg[x,t] <= st[x,t]*(param[x]["Pmax"]-param[x]["Pmin"]))# 技术出力上限
                 # @constraint(m,Pg[x,t] >= st[x,t]*param[x]["Pmin"])# 技术出力下限
                 @constraint(m,PMg[x,t] <= Pg[x,t] + hot[x,t] * param[x]["Pmax"])
@@ -258,8 +258,8 @@ function UC()::Cint
                 # @constraint(m,Pg[x,t] <= (4-DT[x,t])/4 * param[x]["Pmin"] + cold[x,t]*10000 + st[x,t]*10000)
                 # #
                 if t >= T0+1 #爬坡率约束，附带启、停机曲线
-                    @constraint(m,Pg[x,t] - Pg[x,t-1] <= hot[x,t-1]*param[x]["Pmax"]/3 + (1-hot[x,t-1])*param[x]["Pmin"]/4)
-                    @constraint(m,Pg[x,t-1] - Pg[x,t] <= hot[x,t-1]*param[x]["Pmax"]/3 + (1-hot[x,t-1])*param[x]["Pmin"]/4)
+                    # @constraint(m,Pg[x,t] - Pg[x,t-1] <= hot[x,t-1]*param[x]["Pmax"]/3 + (1-hot[x,t-1])*param[x]["Pmin"]/4)
+                    # @constraint(m,Pg[x,t-1] - Pg[x,t] <= hot[x,t-1]*param[x]["Pmax"]/3 + (1-hot[x,t-1])*param[x]["Pmin"]/4)
                     # @constraint(m,Pg[x,t] - Pg[x,t-1] <= param[x]["Pmax"]/3)
                     # @constraint(m,Pg[x,t-1] - Pg[x,t] <= param[x]["Pmax"]/3)
                 # else
@@ -286,8 +286,8 @@ function UC()::Cint
                 @constraint(m,up[x,t] + down[x,t] <= 1)
                 @constraint(m,up[x,t] <= 1 - sum(down[x,t-s] for s in 0:min(t-T0,20)))#停机后间隔四个小时才能开机
                 @constraint(m,down[x,t] <= 1 - sum(up[x,t-s] for s in 0:min(t-T0,20)))#开机后间隔四个小时才能停机
-                @constraint(m, hot[x,t] == st[x,t] - sum(up[x,t-s] for s in 0:min(t-T0,3)))#启动好了
-                @constraint(m, cold[x,t] == 1 - st[x,t] - sum(down[x,t-s] for s in 0:min(t-T0,3)))#停好了
+                # @constraint(m, hot[x,t] == st[x,t] - sum(up[x,t-s] for s in 0:min(t-T0,3)))#启动好了
+                # @constraint(m, cold[x,t] == 1 - st[x,t] - sum(down[x,t-s] for s in 0:min(t-T0,3)))#停好了
             end
             ### 机组约束
             # ## 煤机总体约束
