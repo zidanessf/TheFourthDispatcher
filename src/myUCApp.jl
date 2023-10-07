@@ -193,6 +193,7 @@ function UC()::Cint
         RESERVE0,RESERVE1 = config["应留备用"],config["期望备用"]
         WATER = config["水电发电能力"]
         PR = config["成本系数"]
+        UT,DT,UTD,DTD = 20,20,4,4
         m = Model(CPLEX.Optimizer)
         println("正在进行备用优化...") 
         ### 
@@ -239,34 +240,11 @@ function UC()::Cint
                     @constraint(m,down[x,t] == 0)
                 end
                 ## 机组技术约束
-                @constraint(m,Pg[x,t] == pg[x,t] + param[x]["Pmin"](up[x,t+1]+st[x,t]) + sum()) #冷态启机怎么考虑
+                @constraint(m,Pg[x,t] == pg[x,t] + param[x]["Pmin"]*st[x,t] + 
+                sum((UTD-s+1)*param[x]["Pmin"]/UTD*up[t+s] for s in 1:min(UTD,T-t))+
+                sum((DTD-s+1)*param[x]["Pmin"]/DTD*down[t-s] for s in 1:min(DTD,t-T0))) #冷态启机怎么考虑
                 @constraint(m,pg[x,t] <= st[x,t]*(param[x]["Pmax"]-param[x]["Pmin"]))# 技术出力上限
-                # @constraint(m,Pg[x,t] >= st[x,t]*param[x]["Pmin"])# 技术出力下限
-                @constraint(m,PMg[x,t] <= Pg[x,t] + hot[x,t] * param[x]["Pmax"])
-                @constraint(m,PMg[x,t] >= Pg[x,t] - hot[x,t] * param[x]["Pmax"])
-                @constraint(m,PMg[x,t] <= param[x]["Pmax"])
-                @constraint(m,PMg[x,t] >= hot[x,t] * param[x]["Pmax"])
-                # @constraint(m,Pg[x,t] <= st[x,t]*param[x]["Pmax"])# 技术出力上限
-                # @constraint(m,Pg[x,t] >= st[x,t]*param[x]["Pmin"])# 技术出力下限
-    
-                # ##启动曲线
-                # @constraint(m,Pg[x,t] >= UT[x,t]/4 * param[x]["Pmin"] - hot[x,t]*10000 - (1-st[x,t])*10000)
-                # @constraint(m,Pg[x,t] <= UT[x,t]/4 * param[x]["Pmin"] + hot[x,t]*10000 + (1-st[x,t])*10000)
-                # ##
-                # ##停机曲线
-                # @constraint(m,Pg[x,t] >= (4-DT[x,t])/4 * param[x]["Pmin"] - cold[x,t]*10000 - st[x,t]*10000)
-                # @constraint(m,Pg[x,t] <= (4-DT[x,t])/4 * param[x]["Pmin"] + cold[x,t]*10000 + st[x,t]*10000)
-                # #
-                if t >= T0+1 #爬坡率约束，附带启、停机曲线
-                    # @constraint(m,Pg[x,t] - Pg[x,t-1] <= hot[x,t-1]*param[x]["Pmax"]/3 + (1-hot[x,t-1])*param[x]["Pmin"]/4)
-                    # @constraint(m,Pg[x,t-1] - Pg[x,t] <= hot[x,t-1]*param[x]["Pmax"]/3 + (1-hot[x,t-1])*param[x]["Pmin"]/4)
-                    # @constraint(m,Pg[x,t] - Pg[x,t-1] <= param[x]["Pmax"]/3)
-                    # @constraint(m,Pg[x,t-1] - Pg[x,t] <= param[x]["Pmax"]/3)
-                # else
-                #     if param[x]["running"] == 0
-                #         @constraint(m,Pg[x,t] <= hot[x,t]*param[x]["Pmax"]/3 + (1-hot[x,t])*param[x]["Pmin"]/4)
-                #     end
-                end
+                @constraint(m,PMg[x,t] == Pg[x,t] - pg[x,t] + (param[x]["max"]-param[x]["min"])*st[x,t])
                 if t >= T0+1 #爬坡成本约束
                     @constraint(m,dPg[x,t] >= Pg[x,t] - Pg[x,t-1])
                     @constraint(m,dPg[x,t] >= Pg[x,t-1] - Pg[x,t])
@@ -283,11 +261,9 @@ function UC()::Cint
                     @constraint(m,up[x,t] == 0)
                     @constraint(m,down[x,t] == 0)
                 end
-                @constraint(m,up[x,t] + down[x,t] <= 1)
-                @constraint(m,up[x,t] <= 1 - sum(down[x,t-s] for s in 0:min(t-T0,20)))#停机后间隔四个小时才能开机
-                @constraint(m,down[x,t] <= 1 - sum(up[x,t-s] for s in 0:min(t-T0,20)))#开机后间隔四个小时才能停机
-                # @constraint(m, hot[x,t] == st[x,t] - sum(up[x,t-s] for s in 0:min(t-T0,3)))#启动好了
-                # @constraint(m, cold[x,t] == 1 - st[x,t] - sum(down[x,t-s] for s in 0:min(t-T0,3)))#停好了
+                # @constraint(m,up[x,t] + down[x,t] <= 1)
+                @constraint(m,up[x,t] <= 1 - sum(down[x,t-s] for s in 0:min(t-T0,DT)))#停机后间隔四个小时才能开机
+                @constraint(m,down[x,t] <= 1 - sum(up[x,t-s] for s in 0:min(t-T0,UT)))#开机后间隔四个小时才能停机
             end
             ### 机组约束
             # ## 煤机总体约束
@@ -510,76 +486,6 @@ function UC()::Cint
         end
         data = vcat(data...)
         pretty_table(data;header=(["时段","时刻","负备用","统调负荷","燃煤","燃气","受电","光伏","风电"],["","","(万kW)","(万kW)","(万kW)","(万kW)","(万kW)","(万kW)","(万kW)"]),header_crayon=crayon"yellow bold",tf=tf_unicode_rounded)
-        # println("明日燃机开机容量$(total_capacity)万千瓦，总气量$(Int(sum(df2[!,"计划气量"])))万方。")
-        # for this_plant in gas_plan
-        #     k = this_plant["plant"]
-        #     tmpstr = ""
-        #     gy,ngy = sum(param[x]["是否过夜"] == 1 for x in plant[k]["units"]),sum(param[x]["是否过夜"] == 0 for x in plant[k]["units"])
-        #     if ngy > 0 
-        #         tmpstr *= "$(ngy)机日开夜停"
-        #     end
-        #     if gy > 0
-        #         tmpstr *= "$(gy)机过夜"
-        #     end
-        #     print("$k $(tmpstr)（$(plant[k]["total_gas"])万方）。")
-        #     Tplus7 = [(t + 26)%T + 1 for t in 1:T]
-        #     if length(plant[k]["units"]) == 1
-        #         x = plant[k]["units"][1]
-        #         if param[x]["是否过夜"] == 1
-        #             load_rate = round(100*sum(value(hot[x,t])*value(Pg[x,t]) for t in 1:T)/(sum(value.(hot[x,:]))*param[x]["Pmax"]))
-        #             if load_rate <= 90
-        #                 print("（需压出力运行）\n")
-        #             else
-        #                 print("\n")
-        #             end
-        #         else
-        #             start,stop = findfirst([value(hot[x,t])>0 for t in 1:T]),findlast(([value(hot[x,t])>0 for t in 1:T]))
-        #             if isnothing(start)
-        #                 continue
-        #             end
-        #             start,stop = df[!,"时刻"][Tplus7[start]],df[!,"时刻"][Tplus7[stop]]
-        #             load_rate = round(100*sum(value(hot[x,t])*value(Pg[x,t]) for t in 1:T)/(sum(value.(hot[x,:]))*param[x]["Pmax"]))
-        #             if hour(stop) > 8
-        #                 print("$(Dates.format(start,"HH:MM"))带足--$(Dates.format(stop,"HH:MM"))")
-        #             else
-        #                 print("$(Dates.format(start,"HH:MM"))带足--次日$(Dates.format(stop,"HH:MM"))")
-        #             end
-        #             if load_rate <= 95
-        #                 print("（需压出力运行）\n")
-        #             else
-        #                 print("\n")
-        #             end
-        #         end
-        #     else
-        #         print("\n")
-        #         for i in 1:length(plant[k]["units"])
-        #             x = plant[k]["units"][i]
-        #             if param[x]["是否过夜"] == 1
-        #                 load_rate = round(100*sum(value(hot[x,t])*value(Pg[x,t]) for t in 1:T)/(sum(value.(hot[x,:]))*param[x]["Pmax"]))
-        #                 print("     #$(i)机过夜")
-        #                 if load_rate <= 90
-        #                     print("（需压出力运行）\n")
-        #                 else
-        #                     print("\n")
-        #                 end
-        #             else
-        #                 start,stop = findfirst([value(hot[x,t])>0 for t in 1:T]),findlast(([value(hot[x,t])>0 for t in 1:T]))
-        #                 start,stop = df[!,"时刻"][Tplus7[start]],df[!,"时刻"][Tplus7[stop]]
-        #                 load_rate = round(100*sum(value(hot[x,t])*value(Pg[x,t]) for t in 1:T)/(sum(value.(hot[x,:]))*param[x]["Pmax"]))
-        #                 if hour(stop) > 8
-        #                     print("     #$(i)机: $(Dates.format(start,"HH:MM"))带足--$(Dates.format(stop,"HH:MM"))")
-        #                 else
-        #                     print("     #$(i)机: $(Dates.format(start,"HH:MM"))带足--次日$(Dates.format(stop,"HH:MM"))")
-        #                 end
-        #                 if load_rate <= 90
-        #                     print("（需压出力运行）\n")
-        #                 else
-        #                     print("\n")
-        #                 end
-        #             end
-        #         end
-        #     end
-        # end
         println("请将燃机计划保存至本地，保存后手动另存为xls格式，可在停电智能管控平台-调度日计划（手动导入）中上传、通知...")
         save_file_name = save_file("";filterlist="xlsx")
         # save_file_name = save_dialog("结果保存至...", GtkNullContainer(), (GtkFileFilter("*.xlsx", name="All supported formats"), "*.xlsx"))
